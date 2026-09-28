@@ -24,6 +24,7 @@ func (m *Mux) HTTPHandler(socksAddr string) http.Handler {
 	api.HandleFunc("GET /resolve", m.serveResolve)
 	api.HandleFunc("GET /stats", m.serveStats)
 	api.HandleFunc("GET /peers", m.servePeers)
+	api.HandleFunc("POST /update", m.serveUpdate)
 	api.HandleFunc("POST /tailnets/{name}/{action}", m.serveToggle)
 	api.HandleFunc("GET /proxy.pac", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-ns-proxy-autoconfig")
@@ -87,6 +88,8 @@ type Status struct {
 	Tailnets  []TailnetStatus `json:"tailnets"`
 	Conflicts []Conflict      `json:"conflicts,omitempty"`
 	TUN       any             `json:"tun,omitempty"`
+	Version   string          `json:"version"`
+	Update    any             `json:"update,omitempty"`
 }
 
 // Conflict is a destination more than one tailnet claims.
@@ -105,6 +108,10 @@ func (m *Mux) Status() Status {
 	s.Conflicts = m.Router().Conflicts()
 	if m.TUNStatus != nil {
 		s.TUN = m.TUNStatus()
+	}
+	s.Version = Version
+	if m.UpdateStatus != nil {
+		s.Update = m.UpdateStatus()
 	}
 	return s
 }
@@ -260,4 +267,23 @@ func (m *Mux) PAC(httpHost, socksAddr string) string {
 func uniq(s []string) []string {
 	s = slices.Compact(s)
 	return slices.DeleteFunc(s, func(v string) bool { return v == "" })
+}
+
+// serveUpdate starts an update in the background (same X-Tailmux rule as
+// the tailnet switches); progress shows up in /status.
+func (m *Mux) serveUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-Tailmux") == "" {
+		http.Error(w, "missing X-Tailmux header", http.StatusForbidden)
+		return
+	}
+	if m.TriggerUpdate == nil {
+		http.Error(w, "updates are disabled", http.StatusNotImplemented)
+		return
+	}
+	if err := m.TriggerUpdate(); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+	writeJSON(w, m.Status())
 }

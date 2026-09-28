@@ -23,7 +23,8 @@ A terminal UI for everything in the config:
   it. Otherwise setup brings the tailnets up itself just long enough to log in.
 - **J/K** reorders. Earlier tailnets win ties (see [routing](routing.md)).
 - **p** edits pins, one per line: `10.0.0.0/24 = home`.
-- **o** sets the device name, the proxy ports, and whether TUN mode takes `100.64.0.0/10`.
+- **o** sets the device name, the proxy ports, whether TUN mode takes
+  `100.64.0.0/10`, and whether updates install themselves.
 
 Each tailnet sees this machine as a new device, `tailmux-<hostname>`.
 Consider turning off key expiry for it in the admin console.
@@ -62,3 +63,5 @@ Consider turning off key expiry for it in the admin console.
 | `tun.cgnat` | `false` | Also route `100.64.0.0/10` in TUN mode |
 | `tun.fake_range` | `198.18.0.0/15` | Where fake IPs come from |
 | `tun.name` / `tun.mtu` / `tun.no_dns` | auto / 1500 / false | |
+| `updates.check` | `true` | Check GitHub for releases ([updates](updates.md)) |
+| `updates.auto` | `true` | Install them and restart; `false` only notifies |

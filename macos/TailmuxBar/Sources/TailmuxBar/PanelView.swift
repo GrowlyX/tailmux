@@ -12,6 +12,9 @@ struct PanelView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
+            if let u = store.status?.update, u.available || u.state == "installing" || u.state == "failed" {
+                UpdateBanner(info: u, store: store)
+            }
             if let offline = store.offline {
                 OfflineView(message: offline)
             } else {
@@ -26,7 +29,7 @@ struct PanelView: View {
             FooterView(snapshot: snapshot)
         }
         .padding(14)
-        .frame(width: 340)
+        .frame(width: 372)
     }
 
     private var header: some View {
@@ -149,7 +152,7 @@ struct TailnetRow: View {
                 .fill(tailnet.running ? color : Color.secondary.opacity(0.35))
                 .frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 1) {
-                Text(tailnet.name).font(.system(size: 13, weight: .medium))
+                Text(tailnet.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
                 Text(detail).font(.system(size: 11)).foregroundStyle(detailColor).lineLimit(1)
             }
             .layoutPriority(1)
@@ -304,4 +307,56 @@ struct FooterView: View {
 final class Flag: ObservableObject {
     @Published var on: Bool
     init(_ on: Bool = false) { self.on = on }
+}
+
+struct UpdateBanner: View {
+    var info: UpdateInfo
+    @ObservedObject var store: Store
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .foregroundStyle(info.state == "failed" ? Color.orange : Color.accentColor)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.system(size: 12, weight: .medium))
+                Text(detail).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(2)
+            }
+            Spacer(minLength: 6)
+            if info.state != "installing" && info.state != "installed" {
+                Text(info.state == "failed" ? "Retry" : "Update")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(Capsule().fill(Color.accentColor))
+                    .contentShape(Capsule())
+                    .onTapGesture { store.startUpdate() }
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.accentColor.opacity(0.08)))
+    }
+
+    private var icon: String {
+        switch info.state {
+        case "installing": return "arrow.triangle.2.circlepath"
+        case "failed": return "exclamationmark.triangle"
+        default: return "arrow.down.circle"
+        }
+    }
+
+    private var title: String {
+        let v = info.latest ?? "?"
+        switch info.state {
+        case "installing": return "Updating to \(v)…"
+        case "installed": return "Restarting on \(v)…"
+        case "failed": return "Update to \(v) failed"
+        default: return "tailmux \(v) is available"
+        }
+    }
+
+    private var detail: String {
+        if info.state == "failed" { return info.error ?? "" }
+        if info.state == "installing" { return "Homebrew builds it from source; this takes a minute or two." }
+        return "You have \(info.current)." + (info.auto ? " It installs itself automatically too." : "")
+    }
 }

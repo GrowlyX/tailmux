@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -32,12 +33,45 @@ final class Store: ObservableObject {
             status = s
             stats = Dictionary(uniqueKeysWithValues: x.tailnets.map { ($0.name, $0) })
             offline = nil
+            relaunchIfUpgraded(daemonVersion: s.version)
         } catch {
             status = nil
             stats = [:]
             offline = error.localizedDescription
         }
     }
+
+    func startUpdate() {
+        Task {
+            do { try await api.startUpdate() } catch { offline = error.localizedDescription }
+            await refresh()
+        }
+    }
+
+    /// Homebrew upgrades the app together with the daemon. Once the
+    /// daemon is running a version this app isn't, relaunch from the
+    /// installed bundle that matches it.
+    private func relaunchIfUpgraded(daemonVersion: String?) {
+        guard let dv = daemonVersion, dv != "dev", !relaunching,
+              let mine = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+              mine != dv, mine != "ci", !mine.hasPrefix("0.0.0")
+        else { return }
+        let candidates = ["/opt/homebrew/opt/tailmux/TailmuxBar.app", "/usr/local/opt/tailmux/TailmuxBar.app", "/Applications/TailmuxBar.app"]
+        for path in candidates {
+            guard let info = NSDictionary(contentsOfFile: path + "/Contents/Info.plist"),
+                  info["CFBundleShortVersionString"] as? String == dv
+            else { continue }
+            relaunching = true
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            p.arguments = ["-n", path]
+            try? p.run()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { NSApp.terminate(nil) }
+            return
+        }
+    }
+
+    private var relaunching = false
 
     func setEnabled(_ name: String, _ on: Bool) {
         pending.insert(name)

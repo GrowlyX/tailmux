@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -26,6 +27,7 @@ import (
 	"github.com/GrowlyX/tailmux/internal/mux"
 	"github.com/GrowlyX/tailmux/internal/setup"
 	"github.com/GrowlyX/tailmux/internal/tun"
+	"github.com/GrowlyX/tailmux/internal/update"
 )
 
 // Set at build time: -X main.version=... -X main.defaultConfig=...
@@ -44,6 +46,7 @@ usage:
   tailmux peers [tailnet]      every device, and the name to reach it by
   tailmux resolve <host>       which tailnet a host routes through, and why
   tailmux nc <host> <port>     pipe stdio to host:port (ssh ProxyCommand)
+  tailmux update [-check]      install the latest release (or just check)
   tailmux bar                  open the menu bar app (macOS)
   tailmux example-config       print a starter config
   tailmux version
@@ -67,6 +70,7 @@ func main() {
 	}
 	fs.Parse(args)
 
+	mux.Version = version
 	switch cmd {
 	case "example-config":
 		fmt.Print(exampleConfig)
@@ -98,6 +102,8 @@ func main() {
 		err = up(cfg, *verbose)
 	case "status":
 		err = status(cfg)
+	case "update":
+		err = runUpdate(cfg, fs.Args())
 	case "peers":
 		err = peers(cfg, fs.Arg(0))
 	case "resolve":
@@ -115,6 +121,10 @@ func main() {
 	default:
 		fs.Usage()
 		os.Exit(2)
+	}
+	var re errRestart
+	if errors.As(err, &re) {
+		err = update.Reexec(re.path)
 	}
 	if err != nil {
 		log.Fatal(err)
@@ -202,10 +212,41 @@ func up(cfg *mux.Config, verbose bool) error {
 		names = append(names, t.Name)
 	}
 	log.Printf("joining %d tailnets: %s", len(names), strings.Join(names, ", "))
-	<-ctx.Done()
-	log.Printf("shutting down")
-	return nil
+
+	// Updates: check (and by default install) new releases; when the
+	// binary we were started as changes, shut down cleanly and re-exec.
+	restart := make(chan struct{})
+	invoked := update.InvokedPath()
+	if cfg.Updates.CheckEnabled() {
+		um := update.NewManager(version, cfg.Updates.AutoEnabled())
+		m.UpdateStatus = func() any { return um.Status() }
+		m.TriggerUpdate = func() error {
+			go func() {
+				if err := um.Install(context.Background()); err != nil {
+					log.Printf("update: %v", err)
+				}
+			}()
+			return nil
+		}
+		go um.Run(ctx)
+	}
+	go update.WatchExecutable(ctx, invoked, 15*time.Second, func() { close(restart) })
+
+	select {
+	case <-ctx.Done():
+		log.Printf("shutting down")
+		return nil
+	case <-restart:
+		log.Printf("new tailmux binary installed; restarting")
+		return errRestart{invoked}
+	}
 }
+
+// errRestart makes main re-exec after up's deferred cleanup (TUN device,
+// resolver files, tailnet nodes) has run.
+type errRestart struct{ path string }
+
+func (e errRestart) Error() string { return "restart into " + e.path }
 
 func apiGet(cfg *mux.Config, path string, v any) error {
 	c := &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{Proxy: nil}}
@@ -228,6 +269,9 @@ func status(cfg *mux.Config) error {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d/%d online\n", t.Name, t.State, t.Suffix, strings.Join(t.SelfIPs, ","), t.Online, t.Peers)
 	}
 	tw.Flush()
+	if u, ok := s.Update.(map[string]any); ok && u["available"] == true {
+		fmt.Printf("\nupdate: tailmux %v is available (running %v); `tailmux update` or wait for auto-update\n", u["latest"], s.Version)
+	}
 	if t, ok := s.TUN.(map[string]any); ok {
 		fmt.Printf("\ntun: %v, fake IPs %v, OS DNS %v\n", t["interface"], t["fake_range"], t["dns"])
 	}
@@ -255,6 +299,30 @@ func status(cfg *mux.Config) error {
 			fmt.Printf("  %-20s %s -> %s (%s)\n", c.What, strings.Join(c.Tailnets, ","), c.Winner, how)
 		}
 	}
+	return nil
+}
+
+// runUpdate updates this install in place. A running daemon notices its
+// binary changed and restarts onto the new one by itself.
+func runUpdate(cfg *mux.Config, args []string) error {
+	ctx := context.Background()
+	rel, err := update.Latest(ctx)
+	if err != nil {
+		return err
+	}
+	if !update.Newer(version, rel.Version()) {
+		fmt.Printf("tailmux %s is up to date (latest %s)\n", version, rel.Version())
+		return nil
+	}
+	fmt.Printf("tailmux %s is available (you have %s): %s\n", rel.Version(), version, rel.URL)
+	if len(args) > 0 && (args[0] == "-check" || args[0] == "--check") {
+		return nil
+	}
+	um := update.NewManager(version, false)
+	if err := update.Install(ctx, rel, um.Exe, func(f string, a ...any) { fmt.Printf(f+"\n", a...) }); err != nil {
+		return err
+	}
+	fmt.Println("done; a running daemon restarts onto it within a few seconds")
 	return nil
 }
 

@@ -394,6 +394,7 @@ func (m *model) settingsForm() tea.Cmd {
 	eff := m.effective()
 	host, socks, httpAddr := m.cfg.Hostname, m.cfg.SOCKS5, m.cfg.HTTP
 	cgnat := m.cfg.TUN.CGNAT
+	auto := m.cfg.Updates.AutoEnabled()
 	f := huh.NewForm(huh.NewGroup(
 		huh.NewInput().Title("Device name").Description("How this machine shows up in every tailnet.").
 			Placeholder(eff.Hostname).Value(&host),
@@ -402,10 +403,17 @@ func (m *model) settingsForm() tea.Cmd {
 			Placeholder(eff.HTTP).Value(&httpAddr),
 		huh.NewConfirm().Title("In TUN mode, also route 100.64.0.0/10?").
 			Description("Off leaves Tailscale's own range to the official app.").Value(&cgnat),
+		huh.NewConfirm().Title("Install updates automatically?").
+			Description("Checks every few hours, installs, restarts itself. Off: just notifies.").Value(&auto),
 	))
 	return m.openForm(f, func() {
 		m.cfg.Hostname, m.cfg.SOCKS5, m.cfg.HTTP = strings.TrimSpace(host), strings.TrimSpace(socks), strings.TrimSpace(httpAddr)
 		m.cfg.TUN.CGNAT = cgnat
+		if auto {
+			m.cfg.Updates.Auto = nil // the default
+		} else {
+			m.cfg.Updates.Auto = &auto
+		}
 		m.changed("Settings updated.")
 	})
 }

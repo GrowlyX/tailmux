@@ -28,7 +28,19 @@ type Config struct {
 	Pins map[string]string `json:"pins,omitempty"`
 
 	TUN TUNConfig `json:"tun,omitzero"`
+
+	Updates UpdatesConfig `json:"updates,omitzero"`
 }
+
+// UpdatesConfig: by default tailmux checks for releases every few hours
+// and installs them, then restarts itself onto the new version.
+type UpdatesConfig struct {
+	Check *bool `json:"check,omitempty"` // default true
+	Auto  *bool `json:"auto,omitempty"`  // default true; false only notifies
+}
+
+func (u UpdatesConfig) CheckEnabled() bool { return u.Check == nil || *u.Check }
+func (u UpdatesConfig) AutoEnabled() bool  { return u.CheckEnabled() && (u.Auto == nil || *u.Auto) }
 
 // TUNConfig turns on proxy-free mode: a virtual interface that carries
 // tailnet traffic for every app. Needs root.

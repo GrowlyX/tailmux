@@ -5,6 +5,18 @@ import Foundation
 struct StatusResponse: Decodable {
     var tailnets: [TailnetStatus]
     var tun: TUNInfo?
+    var version: String?
+    var update: UpdateInfo?
+}
+
+struct UpdateInfo: Decodable {
+    var current: String
+    var latest: String?
+    var available: Bool
+    var url: String?
+    var state: String
+    var error: String?
+    var auto: Bool
 }
 
 struct TailnetStatus: Decodable, Identifiable {
@@ -93,6 +105,14 @@ struct API {
 
     func setEnabled(_ name: String, _ on: Bool) async throws {
         var req = URLRequest(url: base.appendingPathComponent("tailnets/\(name)/\(on ? "enable" : "disable")"))
+        req.httpMethod = "POST"
+        req.setValue("1", forHTTPHeaderField: "X-Tailmux")
+        let (data, resp) = try await API.session.data(for: req)
+        try check(resp, data)
+    }
+
+    func startUpdate() async throws {
+        var req = URLRequest(url: base.appendingPathComponent("update"))
         req.httpMethod = "POST"
         req.setValue("1", forHTTPHeaderField: "X-Tailmux")
         let (data, resp) = try await API.session.data(for: req)

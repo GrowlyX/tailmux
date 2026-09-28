@@ -15,6 +15,8 @@ and enable **Open at login** from its menu.
 - **Switches**: turning a tailnet off works like `tailscale down` for that one
   tailnet. Its routes and names drop out immediately, it keeps its login, and
   tailmux remembers the choice.
+- **Updates**: a banner offers a new release, with an **Update** button. The
+  app relaunches itself after Homebrew upgrades it.
 - **Charts**: two minutes of per-tailnet throughput, plus a sparkline and the
   current rate on each row. Hover a row for its routes and byte totals.
 
@@ -30,4 +32,6 @@ The app uses the daemon's local HTTP API (the `http` address, default `127.0.0.1
 | `GET /stats` | Per-tailnet byte counters and 120 one-second rate samples |
 | `GET /resolve?host=` | Routing decision for one destination |
 | `GET /proxy.pac` | The PAC file |
+| `GET /peers` | Every device in every tailnet |
+| `POST /update` | Install the latest release now; progress shows in `/status` |
 | `POST /tailnets/{name}/enable`, `/disable` | Requires an `X-Tailmux` header, which blocks cross-site requests |

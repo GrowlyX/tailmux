@@ -14,6 +14,9 @@ import (
 	"time"
 )
 
+// Version is the running build, reported in /status.
+var Version = "dev"
+
 // Mux joins every configured tailnet at once and routes each connection
 // to the tailnet that owns its destination.
 type Mux struct {
@@ -28,6 +31,10 @@ type Mux struct {
 
 	// TUNStatus, if set, adds TUN details to /status.
 	TUNStatus func() any
+	// UpdateStatus and TriggerUpdate, if set, report on and start an
+	// update (/status and POST /update).
+	UpdateStatus  func() any
+	TriggerUpdate func() error
 
 	listenMu  sync.Mutex
 	listeners []func()

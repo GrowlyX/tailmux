@@ -24,4 +24,5 @@ and subnets from every tailnet work side by side, even when two tailnets use the
 - [TUN mode](docs/tun.md): proxy-free, for every app
 - [Proxy mode](docs/proxy.md): SOCKS5, HTTP, PAC, ssh, kubectl
 - [Menu bar app](docs/menubar.md): switches, throughput, local API
+- [Updates](docs/updates.md): automatic, and how to turn that off
 - [Development](docs/development.md): the in-process test lab, CI, releases
