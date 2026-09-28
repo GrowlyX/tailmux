@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go test -count=1 -timeout 15m ./...
+
+  binaries:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  menubar-app:
+    needs: binaries
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: build and attach TailmuxBar.app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          macos/build-app.sh "$PWD/dist" "$GITHUB_REF_NAME"
+          ditto -c -k --keepParent dist/TailmuxBar.app "TailmuxBar_${GITHUB_REF_NAME#v}_macos.zip"
+          gh release upload "$GITHUB_REF_NAME" "TailmuxBar_${GITHUB_REF_NAME#v}_macos.zip" --clobber
+
+  # Publishes the formula to GrowlyX/homebrew-tap. The tap is written with
+  # a deploy key (secret TAP_DEPLOY_KEY) scoped to that one repository.
+  homebrew:
+    needs: binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: render formula
+        run: |
+          url="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
+          sha=$(curl -fsSL "$url" | sha256sum | cut -d' ' -f1)
+          scripts/render-formula.sh "$url" "$sha" > tailmux.rb
+          cat tailmux.rb
+      - name: push to tap
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+        run: |
+          install -m 600 /dev/null "$RUNNER_TEMP/tap_key"
+          printf '%s\n' "$TAP_DEPLOY_KEY" > "$RUNNER_TEMP/tap_key"
+          export GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/tap_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          git clone git@github.com:GrowlyX/homebrew-tap.git tap
+          mkdir -p tap/Formula
+          cp tailmux.rb tap/Formula/tailmux.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/tailmux.rb
+          git commit -m "tailmux ${GITHUB_REF_NAME#v}" || { echo "formula unchanged"; exit 0; }
+          git push origin HEAD
+
+  # What a user does: tap, install, test.
+  verify-install:
+    needs: homebrew
+    runs-on: macos-latest
+    steps:
+      - run: brew tap growlyx/tap
+      - run: brew install growlyx/tap/tailmux
+      - run: brew test growlyx/tap/tailmux
+      - run: test "$(tailmux version)" = "tailmux ${GITHUB_REF_NAME#v}"

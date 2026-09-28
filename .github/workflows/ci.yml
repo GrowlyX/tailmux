@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: go mod tidy is clean
+        run: go mod tidy && git diff --exit-code go.mod go.sum
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.14.0
+      - name: golangci-lint (darwin)
+        run: GOOS=darwin golangci-lint run ./...
+      - name: builds for every GOOS we claim
+        run: |
+          for os in linux darwin windows freebsd; do GOOS=$os go build ./... ; done
+      - uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: go.mod
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: unit + end-to-end (three in-process tailnets)
+        run: go test -race -count=1 -timeout 15m ./...
+
+  # Proxy-free mode against the real OS: a TUN device, kernel routes and
+  # the system resolver (systemd-resolved on Linux, /etc/resolver on macOS).
+  tun-e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go test -c -o tun.test ./internal/tun
+      - name: TestSystem as root
+        run: sudo TAILMUX_TUN_E2E=1 TAILMUX_TUN_E2E_REQUIRE_DNS=1 ./tun.test -test.run TestSystem -test.v -test.timeout 10m
+      - name: nothing left behind
+        if: always()
+        run: |
+          if [ "$RUNNER_OS" = macOS ] && grep -rl "managed by tailmux" /etc/resolver 2>/dev/null; then exit 1; fi
+          if [ "$RUNNER_OS" = Linux ] && ip link show tailmux0 2>/dev/null; then exit 1; fi
+
+  # The menu bar app, built and rendered against a live daemon.
+  menubar:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: build app
+        run: macos/build-app.sh "$PWD/dist" ci
+      - name: start lab tailnets and daemon
+        run: |
+          go build -o tailmux ./cmd/tailmux
+          TAILMUX_LAB="$PWD/lab.json" go test ./internal/mux -run TestLab -timeout 0 > lab.log 2>&1 &
+          for _ in $(seq 1 90); do [ -f lab.json.ready ] && break; sleep 2; done
+          ./tailmux up -config lab.json > up.log 2>&1 &
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:21056/status && break; sleep 1; done
+          for n in alpha bravo charlie; do curl -sf --socks5-hostname 127.0.0.1:21055 "http://web.$n/?bytes=2000000" > /dev/null; done
+      - name: render panel
+        run: |
+          out=$(TAILMUX_API=http://127.0.0.1:21056 dist/TailmuxBar.app/Contents/MacOS/TailmuxBar --snapshot panel.png --wait 3)
+          echo "$out"
+          echo "$out" | grep -q "3 tailnets, offline: no"
+          TAILMUX_API=http://127.0.0.1:21056 dist/TailmuxBar.app/Contents/MacOS/TailmuxBar --snapshot panel-dark.png --dark
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: menubar-snapshots
+          path: |
+            panel*.png
+            *.log
+
+  # Installs the formula from a tarball of this commit, runs `brew test`
+  # and `brew audit`, exactly as a user's `brew install` would.
+  homebrew:
+    runs-on: macos-latest
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_FROM_API: 1
+    steps:
+      - uses: actions/checkout@v7
+      - name: formula for this commit
+        run: |
+          git archive --format=tar.gz --prefix=tailmux-0.0.0-ci/ -o "$RUNNER_TEMP/tailmux-0.0.0-ci.tar.gz" HEAD
+          sha=$(shasum -a 256 "$RUNNER_TEMP/tailmux-0.0.0-ci.tar.gz" | cut -d' ' -f1)
+          brew tap-new --no-git ci/local
+          tap="$(brew --repository)/Library/Taps/ci/homebrew-local"
+          mkdir -p "$tap/Formula"
+          scripts/render-formula.sh "file://$RUNNER_TEMP/tailmux-0.0.0-ci.tar.gz" "$sha" > "$tap/Formula/tailmux.rb"
+      - run: brew install --build-from-source ci/local/tailmux
+      - run: brew test ci/local/tailmux
+      - run: brew audit --strict ci/local/tailmux
+      - run: tailmux version && test -f "$(brew --prefix)/etc/tailmux/config.json"

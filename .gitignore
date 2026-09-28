@@ -1,0 +1,5 @@
+bin/
+/tailmux
+*.test
+dist/
+lab.json*
