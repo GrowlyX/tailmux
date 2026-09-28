@@ -24,6 +24,7 @@ import (
 	"golang.org/x/net/proxy"
 
 	"github.com/GrowlyX/tailmux/internal/mux"
+	"github.com/GrowlyX/tailmux/internal/setup"
 	"github.com/GrowlyX/tailmux/internal/tun"
 )
 
@@ -38,6 +39,7 @@ const usage = `tailmux: be on N tailnets at once.
 usage:
   tailmux up [-v] [-tun]       run the daemon (SOCKS5, HTTP proxy, PAC, DNS);
                                -tun also routes tailnets for every app (root)
+  tailmux setup                add tailnets and log in (interactive)
   tailmux status               tailnets, routes and conflicts
   tailmux resolve <host>       which tailnet a host routes through, and why
   tailmux nc <host> <port>     pipe stdio to host:port (ssh ProxyCommand)
@@ -71,6 +73,11 @@ func main() {
 	case "version", "-version", "--version":
 		fmt.Println("tailmux", version)
 		return
+	case "setup":
+		if err := setup.Run(*cfgPath); err != nil {
+			log.Fatal(err)
+		}
+		return
 	case "bar":
 		if err := openBar(); err != nil {
 			log.Fatal(err)
@@ -79,7 +86,7 @@ func main() {
 	}
 	cfg, err := mux.LoadConfig(*cfgPath)
 	if err != nil {
-		log.Fatalf("%v\n(run `tailmux example-config > %s` to start)", err, *cfgPath)
+		log.Fatalf("%v\n(run `tailmux setup` to create it)", err)
 	}
 
 	switch cmd {
@@ -129,18 +136,18 @@ func openBar() error {
 	return fmt.Errorf("TailmuxBar.app not found (looked in %s); build it with macos/build-app.sh", strings.Join(cands, ", "))
 }
 
-// configPath picks $TAILMUX_CONFIG, then the per-user config if it
-// exists, then the one baked in at build time (Homebrew's etc/).
+// configPath picks $TAILMUX_CONFIG, then the path baked in at build time
+// (Homebrew's etc/, shared by the CLI and the service), then
+// ~/.config/tailmux/config.json.
 func configPath() string {
 	if p := os.Getenv("TAILMUX_CONFIG"); p != "" {
 		return p
 	}
-	home, _ := os.UserHomeDir()
-	user := filepath.Join(home, ".config", "tailmux", "config.json")
-	if _, err := os.Stat(user); err == nil || defaultConfig == "" {
-		return user
+	if defaultConfig != "" {
+		return defaultConfig
 	}
-	return defaultConfig
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "tailmux", "config.json")
 }
 
 func up(cfg *mux.Config, verbose bool) error {

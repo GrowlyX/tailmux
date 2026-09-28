@@ -36,16 +36,16 @@ class Tailmux < Formula
 
   def caveats
     s = <<~EOS
-      Put one entry per tailnet in:
-        #{etc}/tailmux/config.json
+      Add your tailnets and log in to each:
+        tailmux setup
 
       Proxy mode (SOCKS5 127.0.0.1:1055, HTTP proxy + PAC 127.0.0.1:1056):
         brew services start tailmux
-      TUN mode, for every app without proxy settings: set "tun": {"enabled": true}, then
+      TUN mode, for every app without proxy settings (press t in setup), then
         sudo brew services start tailmux
       Pick one; state in #{var}/lib/tailmux is owned by whoever runs it.
 
-      Each tailnet prints a login URL on first start: `tailmux status`.
+      Config: #{etc}/tailmux/config.json
     EOS
     if OS.mac?
       s += <<~EOS
