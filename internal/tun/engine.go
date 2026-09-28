@@ -116,6 +116,10 @@ func (e *Engine) fromDevice() error {
 			if len(pkt) == 0 {
 				continue
 			}
+			if isEcho4(pkt) {
+				go e.handlePing(append([]byte(nil), pkt...))
+				continue
+			}
 			var proto tcpip.NetworkProtocolNumber
 			switch pkt[0] >> 4 {
 			case 4:
@@ -286,18 +290,27 @@ func (e *Engine) answerDNS(query []byte) []byte {
 	}
 	rh := dnsmessage.Header{ID: h.ID, Response: true, Authoritative: true, RecursionDesired: h.RecursionDesired, RecursionAvailable: true, RCode: dnsmessage.RCodeNameError}
 	name := q.Name.String()
-	var fake netip.Addr
+	var answers []netip.Addr
 	if d := e.m.Router().RouteName(name); d.OK() {
-		exists := len(d.IPs) > 0
-		if !exists {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_, err := e.m.Resolve(ctx, name)
-			cancel()
-			exists = err == nil
-		}
-		if exists {
+		if len(d.IPs) > 0 {
 			rh.RCode = dnsmessage.RCodeSuccess
-			fake = e.fake.For(name)
+			answers = []netip.Addr{e.fake.For(name)}
+		} else {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			tgt, err := e.m.Resolve(ctx, name)
+			cancel()
+			switch {
+			case err != nil:
+				// NXDOMAIN
+			case tgt.Tailnet == "":
+				// Split DNS pointed outside the tailnet: hand back the real
+				// addresses so the OS connects directly.
+				rh.RCode = dnsmessage.RCodeSuccess
+				answers = tgt.IPs
+			default:
+				rh.RCode = dnsmessage.RCodeSuccess
+				answers = []netip.Addr{e.fake.For(name)}
+			}
 		}
 	}
 	b := dnsmessage.NewBuilder(nil, rh)
@@ -305,8 +318,14 @@ func (e *Engine) answerDNS(query []byte) []byte {
 	b.StartQuestions()
 	b.Question(q)
 	b.StartAnswers()
-	if fake.IsValid() && q.Type == dnsmessage.TypeA {
-		b.AResource(dnsmessage.ResourceHeader{Name: q.Name, Class: dnsmessage.ClassINET, TTL: 60}, dnsmessage.AResource{A: fake.As4()})
+	rr := dnsmessage.ResourceHeader{Name: q.Name, Class: dnsmessage.ClassINET, TTL: 60}
+	for _, ip := range answers {
+		switch {
+		case q.Type == dnsmessage.TypeA && ip.Is4():
+			b.AResource(rr, dnsmessage.AResource{A: ip.As4()})
+		case q.Type == dnsmessage.TypeAAAA && ip.Is6() && !e.fake.Prefix().Contains(ip):
+			b.AAAAResource(rr, dnsmessage.AAAAResource{AAAA: ip.As16()})
+		}
 	}
 	out, _ := b.Finish()
 	return out

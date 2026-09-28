@@ -199,3 +199,35 @@ func (m *Mux) serveToggle(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, m.byName[r.PathValue("name")].Status())
 }
+
+// PeerInfo is one device in one tailnet, for `tailmux peers`.
+type PeerInfo struct {
+	Tailnet string   `json:"tailnet"`
+	Name    string   `json:"name"`
+	Alias   string   `json:"alias"` // name.tailnet: what to type
+	FQDN    string   `json:"fqdn"`
+	IPs     []string `json:"ips"`
+	Online  bool     `json:"online"`
+	Routes  []string `json:"routes,omitempty"`
+}
+
+func (m *Mux) Peers() []PeerInfo {
+	var out []PeerInfo
+	for _, s := range m.Router().Snapshots() {
+		for _, p := range s.Peers {
+			pi := PeerInfo{Tailnet: s.Name, Name: p.Name, Alias: p.Name + "." + s.Name, FQDN: p.FQDN, Online: p.Online}
+			for _, ip := range p.IPs {
+				pi.IPs = append(pi.IPs, ip.String())
+			}
+			for _, r := range p.Routes {
+				pi.Routes = append(pi.Routes, r.String())
+			}
+			out = append(out, pi)
+		}
+	}
+	return out
+}
+
+func (m *Mux) servePeers(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, m.Peers())
+}

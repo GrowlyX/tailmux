@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -164,6 +165,24 @@ func TestEndToEnd(t *testing.T) {
 			}
 			return nil
 		})
+	})
+
+	t.Run("split DNS pointing outside the tailnet goes direct", func(t *testing.T) {
+		for _, snap := range m.Router().Snapshots() {
+			if slices.Contains(snap.SplitDNS, "ts.net") {
+				t.Errorf("%s claims ts.net", snap.Name)
+			}
+		}
+		tgt, err := m.Resolve(context.Background(), "public.corp.internal")
+		if err != nil || tgt.Tailnet != "" || len(tgt.IPs) == 0 || tgt.IPs[0] != netip.MustParseAddr("127.0.0.1") {
+			t.Fatalf("got %+v %v, want direct to 127.0.0.1", tgt, err)
+		}
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "public") }))
+		defer srv.Close()
+		_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+		if got, err := getVia(socksHTTP, "http://public.corp.internal:"+port+"/"); err != nil || got != "public" {
+			t.Fatalf("via proxy: %q %v", got, err)
+		}
 	})
 
 	t.Run("http proxy", func(t *testing.T) {

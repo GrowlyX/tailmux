@@ -127,3 +127,19 @@ func TestConflicts(t *testing.T) {
 		t.Errorf("conflicts = %v, want %v", got, want)
 	}
 }
+
+func TestUsefulSplitDomain(t *testing.T) {
+	for dom, want := range map[string]bool{
+		"corp.internal":       true,
+		"ts.net":              false, // every tailnet has it
+		"tail1234.ts.net":     false, // our own MagicDNS suffix
+		"1234.ts.net":         true,  // shares characters, not labels
+		"64.100.in-addr.arpa": false,
+		"":                    false,
+		"other.ts.net":        true, // not a parent of our suffix: someone's real split domain
+	} {
+		if got := usefulSplitDomain(dom, "tail1234.ts.net"); got != want {
+			t.Errorf("usefulSplitDomain(%q) = %v, want %v", dom, got, want)
+		}
+	}
+}

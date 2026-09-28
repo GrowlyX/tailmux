@@ -116,7 +116,9 @@ func (f *Tailnet) SplitDNS(t *testing.T, ctx context.Context, zone string, answe
 	want := netip.MustParseAddr("100.64.0.1")
 	f.Control.DNSConfig = &tailcfg.DNSConfig{
 		Proxied: true,
-		Routes:  map[string][]*dnstype.Resolver{zone: {{Addr: want.String()}}},
+		// Real tailnets also carry a "ts.net" route; it must not make
+		// tailmux think this tailnet owns every *.ts.net name.
+		Routes: map[string][]*dnstype.Resolver{zone: {{Addr: want.String()}}, "ts.net": {{Addr: want.String()}}},
 	}
 	s, ip := f.Node(t, ctx, "resolver")
 	if ip != want {
@@ -147,7 +149,11 @@ func (f *Tailnet) SplitDNS(t *testing.T, ctx context.Context, zone string, answe
 			b.Question(q)
 			b.StartAnswers()
 			if q.Type == dnsmessage.TypeA && strings.HasSuffix(q.Name.String(), "."+zone+".") {
-				b.AResource(dnsmessage.ResourceHeader{Name: q.Name, Class: dnsmessage.ClassINET, TTL: 60}, dnsmessage.AResource{A: answer.As4()})
+				a := answer.As4()
+				if strings.HasPrefix(q.Name.String(), "public.") {
+					a = [4]byte{127, 0, 0, 1} // a split-DNS name that lives outside the tailnet
+				}
+				b.AResource(dnsmessage.ResourceHeader{Name: q.Name, Class: dnsmessage.ClassINET, TTL: 60}, dnsmessage.AResource{A: a})
 			}
 			out, _ := b.Finish()
 			pc.WriteTo(out, addr)

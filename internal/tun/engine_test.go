@@ -261,6 +261,13 @@ func TestEngine(t *testing.T) {
 		}
 	})
 
+	t.Run("off-net split DNS gets real IPs", func(t *testing.T) {
+		ip, rc := lookup("public.corp.internal.")
+		if rc != dnsmessage.RCodeSuccess || ip != netip.MustParseAddr("127.0.0.1") {
+			t.Fatalf("got %v %v, want the real 127.0.0.1 (not a fake IP)", ip, rc)
+		}
+	})
+
 	t.Run("UDP through the tunnel", func(t *testing.T) {
 		// Ask charlie's in-tailnet resolver directly, by name, over UDP.
 		rip, rc := lookup("resolver.charlie.")

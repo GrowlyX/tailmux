@@ -6,7 +6,9 @@
 2. **`host.<tailnet>`**: `db.home` means db in the tailnet named home.
 3. **Full MagicDNS names** like `db.tail1234.ts.net`. Suffixes are unique per tailnet.
 4. **Split DNS domains** from each tailnet's admin console. The query goes to
-   that tailnet's resolvers, through that tailnet.
+   that tailnet's resolvers, through that tailnet. If the answer is somewhere
+   that tailnet can't reach, like a public IP, the connection goes direct.
+   Tailscale's catch-all `ts.net` route is ignored, since every tailnet has it.
 5. **Bare hostnames** like `db`, matched against every tailnet's peers. An
    online peer wins, then config order. This works in proxy mode only.
 6. **Anything else** is resolved normally. If the answer falls in a tailnet's
@@ -28,9 +30,10 @@ Every tailnet numbers its devices from `100.64.0.0/10`, so two tailnets often
 share an IP. Names never collide, so prefer them. [TUN mode](tun.md) gives each
 name its own fake IP for exactly this reason.
 
-See what's contested and who wins:
+See what's there, what's contested and who wins:
 
 ```sh
+tailmux peers dormlab      # every device, as the name to type (host.tailnet)
 tailmux status             # conflicts section
 tailmux resolve db         # one destination: which tailnet, why, who else claimed it
 ```

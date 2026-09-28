@@ -23,6 +23,7 @@ func (m *Mux) HTTPHandler(socksAddr string) http.Handler {
 	api.HandleFunc("GET /status", m.serveStatus)
 	api.HandleFunc("GET /resolve", m.serveResolve)
 	api.HandleFunc("GET /stats", m.serveStats)
+	api.HandleFunc("GET /peers", m.servePeers)
 	api.HandleFunc("POST /tailnets/{name}/{action}", m.serveToggle)
 	api.HandleFunc("GET /proxy.pac", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-ns-proxy-autoconfig")

@@ -2,6 +2,7 @@ package mux
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -18,6 +19,7 @@ import (
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/store/mem"
 	"tailscale.com/net/tsaddr"
+	"tailscale.com/tailcfg"
 	"tailscale.com/tsnet"
 	"tailscale.com/types/logger"
 )
@@ -175,9 +177,7 @@ func (t *Tailnet) refresh(ctx context.Context) {
 			dnsOK = true
 			for dom, res := range dc.Routes {
 				dom = normName(dom)
-				// Empty resolver lists are MagicDNS-internal (ExtraRecords);
-				// reverse zones aren't useful for forward routing.
-				if len(res) == 0 || strings.HasSuffix(dom, ".arpa") {
+				if len(res) == 0 || !usefulSplitDomain(dom, snap.Suffix) {
 					continue
 				}
 				snap.SplitDNS = append(snap.SplitDNS, dom)
@@ -234,6 +234,19 @@ func (t *Tailnet) Dial(ctx context.Context, network, addr string) (net.Conn, err
 	return &countingConn{Conn: c, tr: &t.traffic}, nil
 }
 
+// Ping sends an ICMP echo through the tailnet (to a peer or anything
+// behind a subnet router) and waits for the answer.
+func (t *Tailnet) Ping(ctx context.Context, ip netip.Addr) error {
+	res, err := t.lc.Ping(ctx, ip, tailcfg.PingICMP)
+	if err != nil {
+		return err
+	}
+	if res.Err != "" {
+		return errors.New(res.Err)
+	}
+	return nil
+}
+
 func (t *Tailnet) Enabled() bool { return !t.disabled.Load() }
 
 func (t *Tailnet) setEnabled(ctx context.Context, on bool) error {
@@ -260,7 +273,7 @@ func (t *Tailnet) setEnabled(ctx context.Context, on bool) error {
 // which can't reach a resolver that only exists inside the tailnet.
 // Everything else (MagicDNS, ExtraRecords) uses the node's resolver.
 func (t *Tailnet) Resolve(ctx context.Context, name string) ([]netip.Addr, error) {
-	if res := t.splitResolvers(name); len(res) > 0 {
+	if res := t.splitResolvers(name); len(res) > 0 && !t.ownName(name) {
 		return t.resolveVia(ctx, name, res)
 	}
 	var out []netip.Addr
@@ -285,6 +298,30 @@ func (t *Tailnet) Resolve(ctx context.Context, name string) ([]netip.Addr, error
 		return nil, firstErr
 	}
 	return out, nil
+}
+
+// ownName reports whether name is under this tailnet's MagicDNS suffix;
+// those always go to MagicDNS, whatever split routes cover a parent.
+func (t *Tailnet) ownName(name string) bool {
+	suf := t.Snapshot().Suffix
+	return suf != "" && hasSuffixDomain(normName(name), suf)
+}
+
+// usefulSplitDomain filters a tailnet's DNS routes down to the ones that
+// mean "this tailnet owns these names". Dropped: empty (MagicDNS-internal
+// ExtraRecords), reverse zones, and anything at or above the MagicDNS
+// suffix, like the "ts.net" route Tailscale adds for its public names,
+// which every tailnet has and none owns.
+func usefulSplitDomain(dom, suffix string) bool {
+	switch {
+	case dom == "" || strings.HasSuffix(dom, ".arpa"):
+		return false
+	case suffix != "" && hasSuffixDomain(suffix, dom):
+		return false
+	case dom == "ts.net" || dom == "beta.tailscale.net":
+		return false
+	}
+	return true
 }
 
 func (t *Tailnet) splitResolvers(name string) []netip.AddrPort {
@@ -322,7 +359,9 @@ func (t *Tailnet) resolveVia(ctx context.Context, name string, resolvers []netip
 	return nil, fmt.Errorf("%s via %s split DNS: %w", name, t.cfg.Name, lastErr)
 }
 
-// owns reports whether ip is reachable through this tailnet.
+// Owns reports whether ip is reachable through this tailnet.
+func (t *Tailnet) Owns(ip netip.Addr) bool { return t.owns(ip) }
+
 func (t *Tailnet) owns(ip netip.Addr) bool {
 	d := NewRouter([]Snapshot{t.Snapshot()}, Pins{}).RouteIP(ip)
 	return d.OK() || tsaddr.IsTailscaleIP(ip)

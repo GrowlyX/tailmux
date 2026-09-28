@@ -41,6 +41,7 @@ usage:
                                -tun also routes tailnets for every app (root)
   tailmux setup                add tailnets and log in (interactive)
   tailmux status               tailnets, routes and conflicts
+  tailmux peers [tailnet]      every device, and the name to reach it by
   tailmux resolve <host>       which tailnet a host routes through, and why
   tailmux nc <host> <port>     pipe stdio to host:port (ssh ProxyCommand)
   tailmux bar                  open the menu bar app (macOS)
@@ -97,6 +98,8 @@ func main() {
 		err = up(cfg, *verbose)
 	case "status":
 		err = status(cfg)
+	case "peers":
+		err = peers(cfg, fs.Arg(0))
 	case "resolve":
 		if fs.NArg() != 1 {
 			fs.Usage()
@@ -253,6 +256,30 @@ func status(cfg *mux.Config) error {
 		}
 	}
 	return nil
+}
+
+func peers(cfg *mux.Config, only string) error {
+	var ps []mux.PeerInfo
+	if err := apiGet(cfg, "/peers", &ps); err != nil {
+		return err
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tADDRESS\tSTATUS\tROUTES")
+	for _, p := range ps {
+		if only != "" && p.Tailnet != only {
+			continue
+		}
+		st := "offline"
+		if p.Online {
+			st = "online"
+		}
+		addr := ""
+		if len(p.IPs) > 0 {
+			addr = p.IPs[0]
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", p.Alias, addr, st, strings.Join(p.Routes, " "))
+	}
+	return tw.Flush()
 }
 
 func resolve(cfg *mux.Config, host string) error {

@@ -154,11 +154,18 @@ func (m *Mux) Resolve(ctx context.Context, host string) (Target, error) {
 			tgt.IPs = []netip.Addr{ip}
 		}
 		if len(tgt.IPs) == 0 && d.Query != "" {
-			ips, err := m.resolveIn(ctx, m.byName[d.Tailnet], d.Query)
+			tn := m.byName[d.Tailnet]
+			ips, err := m.resolveIn(ctx, tn, d.Query)
 			if err != nil {
 				return tgt, err
 			}
 			tgt.IPs = ips
+			// A split-DNS name can resolve somewhere its tailnet can't
+			// reach (a public IP): then it isn't really in the tailnet.
+			if !slices.ContainsFunc(ips, tn.owns) {
+				tgt.Tailnet = ""
+				tgt.Decision.Kind += "-offnet"
+			}
 		}
 		sortV4First(tgt.IPs)
 		return tgt, nil
