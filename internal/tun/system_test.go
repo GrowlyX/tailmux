@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 	"testing"
@@ -137,6 +138,21 @@ func TestSystem(t *testing.T) {
 			}
 			if ip != netip.MustParseAddr("203.0.113.200") {
 				return fmt.Errorf("got %v", ip)
+			}
+			return nil
+		})
+	})
+
+	t.Run("ping over the kernel", func(t *testing.T) {
+		ip := fakeFor("web.charlie.")
+		lab.Eventually(t, "ping web.charlie", 60*time.Second, func() error {
+			wait := []string{"-W", "5"} // Linux: seconds
+			if runtime.GOOS == "darwin" {
+				wait = []string{"-t", "5"}
+			}
+			out, err := exec.Command("ping", append([]string{"-c", "1"}, append(wait, ip.String())...)...).CombinedOutput()
+			if err != nil {
+				return fmt.Errorf("%v: %s", err, out)
 			}
 			return nil
 		})

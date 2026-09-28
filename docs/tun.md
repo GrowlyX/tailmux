@@ -31,8 +31,11 @@ through the owning tailnet. So `ssh db.home`, `psql -h db.corp.internal` and
 - **Clean exit.** Routes go away with the interface. Resolver files carry a
   marker and are removed on exit, or at the next start after a crash.
 
+`ping` works too. tailmux answers an echo only after the destination
+actually answered through its tailnet, so the round-trip time is real.
+
 ## Limits
 
-- ICMP (ping) isn't forwarded.
 - Bare hostnames like `db` need a suffix in TUN mode (`db.home`), because
   tailmux doesn't install search domains.
+- IPv6 ping isn't forwarded.
