@@ -46,8 +46,14 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      # Each package runs its own set of in-process tailnets; one package at
+      # a time keeps small runners from starving WireGuard handshakes. The
+      # race detector's ~10x slowdown only fits on the Linux runners.
       - name: unit + end-to-end (three in-process tailnets)
-        run: go test -race -count=1 -timeout 15m ./...
+        run: |
+          race=""
+          if [ "$RUNNER_OS" = Linux ]; then race=-race; fi
+          go test $race -p 1 -count=1 -timeout 20m ./...
 
   # Proxy-free mode against the real OS: a TUN device, kernel routes and
   # the system resolver (systemd-resolved on Linux, /etc/resolver on macOS).

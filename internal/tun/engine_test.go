@@ -66,6 +66,10 @@ func startMux(t *testing.T, ctx context.Context) (*mux.Mux, *mux.Config, map[str
 		}
 		return nil
 	})
+	lab.WarmUp(t, func(ctx context.Context, network, addr string) (net.Conn, error) {
+		c, _, err := m.DialTailnet(ctx, network, addr)
+		return c, err
+	})
 	return m, cfg, webIPs
 }
 

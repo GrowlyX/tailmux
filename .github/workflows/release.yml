@@ -15,7 +15,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - run: go test -count=1 -timeout 15m ./...
+      - run: go test -p 1 -count=1 -timeout 20m ./...
 
   binaries:
     needs: test

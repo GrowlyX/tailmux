@@ -69,6 +69,10 @@ func TestEndToEnd(t *testing.T) {
 		return nil
 	})
 
+	lab.WarmUp(t, func(ctx context.Context, network, addr string) (net.Conn, error) {
+		c, _, err := m.DialTailnet(ctx, network, addr)
+		return c, err
+	})
 	socksLn, _ := net.Listen("tcp", "127.0.0.1:0")
 	httpLn, _ := net.Listen("tcp", "127.0.0.1:0")
 	dnsPC, _ := net.ListenPacket("udp", "127.0.0.1:0")

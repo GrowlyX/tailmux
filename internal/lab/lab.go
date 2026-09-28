@@ -188,3 +188,21 @@ func Eventually(t *testing.T, what string, timeout time.Duration, f func() error
 	}
 	t.Fatalf("%s: %v", what, err)
 }
+
+// WarmUp waits until every lab tailnet is reachable end to end through
+// dial: the first WireGuard handshakes can take a while on a loaded CI
+// machine, and tests shouldn't spend their own timeouts on that.
+func WarmUp(t *testing.T, dial func(ctx context.Context, network, addr string) (net.Conn, error)) {
+	t.Helper()
+	for _, addr := range []string{"web.alpha:80", "web.bravo:80", "web.charlie:80", "198.51.100.3:22", "198.51.100.137:22", "203.0.113.9:22"} {
+		Eventually(t, "warm up "+addr, 3*time.Minute, func() error {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			c, err := dial(ctx, "tcp", addr)
+			if err != nil {
+				return err
+			}
+			return c.Close()
+		})
+	}
+}
