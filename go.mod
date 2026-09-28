@@ -7,7 +7,7 @@ require (
 	charm.land/huh/v2 v2.0.3
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/tailscale/wireguard-go v0.0.0-20260715223240-2e01ba5b00f0
-	golang.org/x/net v0.58.0
+	golang.org/x/net v0.59.0
 	gvisor.dev/gvisor v0.0.0-20260224225140-573d5e7127a8
 	tailscale.com v1.102.5
 )
