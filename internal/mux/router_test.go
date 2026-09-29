@@ -1,6 +1,9 @@
 package mux
 
 import (
+	"errors"
+	"fmt"
+	"net"
 	"net/netip"
 	"slices"
 	"testing"
@@ -154,5 +157,42 @@ func TestPeerAddrs(t *testing.T) {
 	want := []string{"100.64.0.1/32", "100.64.0.2/32", "100.64.0.9/32", "100.70.0.3/32"}
 	if !slices.Equal(s, want) {
 		t.Errorf("got %v, want %v", s, want)
+	}
+}
+
+func TestReconnectingKeepsClaims(t *testing.T) {
+	snaps := testRouter(Pins{}).Snapshots()
+	snaps[1].Running, snaps[1].Reconnecting = false, true // home, just woke up
+	r := NewRouter(snaps, Pins{})
+	if d := r.RouteName("nas.home"); d.Tailnet != "home" {
+		t.Errorf("reconnecting tailnet lost its names: %+v", d)
+	}
+	if d := r.RouteIP(ip("10.0.5.7")); d.Tailnet != "home" {
+		t.Errorf("reconnecting tailnet lost its routes: %+v", d)
+	}
+	_, doms := r.Claims()
+	if !slices.Contains(doms, "tailbbbb.ts.net") {
+		t.Errorf("reconnecting tailnet's DNS domain withdrawn: %v", doms)
+	}
+	snaps[1].Reconnecting = false // logged out / switched off
+	stopped := NewRouter(snaps, Pins{})
+	if d := stopped.RouteIP(ip("10.0.5.7")); d.Tailnet == "home" {
+		t.Errorf("stopped tailnet still routes: %+v", d)
+	}
+	if _, doms := stopped.Claims(); slices.Contains(doms, "tailbbbb.ts.net") {
+		t.Errorf("stopped tailnet still claims its DNS domain: %v", doms)
+	}
+}
+
+func TestIsNotFound(t *testing.T) {
+	for err, want := range map[error]bool{
+		fmt.Errorf("x: %w in tailnet y", ErrNoSuchHost):      true,
+		&net.DNSError{Err: "no such host", IsNotFound: true}: true,
+		&net.DNSError{Err: "i/o timeout", IsTimeout: true}:   false,
+		errors.New("context deadline exceeded"):              false,
+	} {
+		if got := IsNotFound(err); got != want {
+			t.Errorf("IsNotFound(%v) = %v", err, got)
+		}
 	}
 }

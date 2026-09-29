@@ -61,6 +61,20 @@ func (linuxOS) setDNS(ifname string, domains []string, server netip.Addr) (bool,
 	return true, nil
 }
 
+func (linuxOS) dnsIntact(ifname string, domains []string) bool {
+	if !resolvedRunning() || len(domains) == 0 {
+		return true
+	}
+	out, err := exec.Command("resolvectl", "domain", ifname).CombinedOutput()
+	return err == nil && strings.Contains(string(out), "~"+domains[0])
+}
+
+func (linuxOS) flushDNS() {
+	if resolvedRunning() {
+		exec.Command("resolvectl", "flush-caches").Run()
+	}
+}
+
 func resolvedRunning() bool {
 	if _, err := exec.LookPath("resolvectl"); err != nil {
 		return false

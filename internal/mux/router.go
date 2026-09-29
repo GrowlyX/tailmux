@@ -17,6 +17,11 @@ type Snapshot struct {
 	SplitDNS []string // split-DNS domains the tailnet's resolver owns
 	Peers    []Peer
 	Running  bool
+	// Reconnecting: enabled and logged in but not Running right now (the
+	// minutes after waking from sleep). It keeps its routes and names so
+	// nothing falls through to the public internet or gets cached as
+	// "doesn't exist"; connections just fail until it's back.
+	Reconnecting bool
 }
 
 type Peer struct {
@@ -92,7 +97,7 @@ func (r *Router) RouteIP(ip netip.Addr) Decision {
 	}
 	var cands []ipCandidate
 	for _, n := range r.nets {
-		if !n.Running {
+		if !n.active() {
 			continue
 		}
 		var best *ipCandidate
@@ -150,7 +155,7 @@ func (r *Router) pinnedPrefix(ip netip.Addr) (Decision, bool) {
 			best, tn = p, t
 		}
 	}
-	if n := r.find(tn); n == nil || !n.Running {
+	if n := r.find(tn); n == nil || !n.active() {
 		return Decision{}, false // a pin to a stopped tailnet falls back to normal routing
 	}
 	return Decision{Tailnet: tn, Kind: KindPinned, Prefix: best.String()}, true
@@ -188,7 +193,7 @@ func (r *Router) RouteName(host string) Decision {
 			pinDom, pinNet = dom, tn
 		}
 	}
-	if n := r.find(pinNet); n != nil && n.Running {
+	if n := r.find(pinNet); n != nil && n.active() {
 		d := r.nameIn(n, name)
 		d.Kind = KindPinned
 		return d
@@ -219,7 +224,7 @@ func (r *Router) RouteName(host string) Decision {
 	var contested []string
 	for i := range r.nets {
 		n := &r.nets[i]
-		if !n.Running {
+		if !n.active() {
 			continue
 		}
 		for _, dom := range n.SplitDNS {
@@ -245,7 +250,7 @@ func (r *Router) RouteName(host string) Decision {
 		var online []bool
 		for i := range r.nets {
 			n := &r.nets[i]
-			if !n.Running {
+			if !n.active() {
 				continue
 			}
 			if p := n.peer(name); p != nil {
@@ -294,6 +299,9 @@ func (r *Router) nameIn(n *Snapshot, name string) Decision {
 	return Decision{Tailnet: n.Name, Query: name}
 }
 
+// active: this tailnet's routes and names are claimed.
+func (n *Snapshot) active() bool { return n.Running || n.Reconnecting }
+
 func (n *Snapshot) peer(short string) *Peer {
 	for i := range n.Peers {
 		if strings.EqualFold(n.Peers[i].Name, short) {
@@ -315,7 +323,7 @@ func peerDecision(n *Snapshot, p *Peer) Decision {
 // to send into a TUN, and DNS domains to point at tailmux.
 func (r *Router) Claims() (prefixes []netip.Prefix, domains []string) {
 	for _, n := range r.nets {
-		if !n.Running {
+		if !n.active() {
 			continue
 		}
 		domains = append(domains, n.Name)
@@ -348,7 +356,7 @@ func (r *Router) Claims() (prefixes []netip.Prefix, domains []string) {
 func (r *Router) PeerAddrs() []netip.Prefix {
 	var out []netip.Prefix
 	for _, n := range r.nets {
-		if !n.Running {
+		if !n.active() {
 			continue
 		}
 		for _, p := range n.Peers {

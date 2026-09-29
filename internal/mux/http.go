@@ -25,6 +25,7 @@ func (m *Mux) HTTPHandler(socksAddr string) http.Handler {
 	api.HandleFunc("GET /stats", m.serveStats)
 	api.HandleFunc("GET /peers", m.servePeers)
 	api.HandleFunc("POST /update", m.serveUpdate)
+	api.HandleFunc("POST /repair", m.serveRepair)
 	api.HandleFunc("POST /tailnets/{name}/{action}", m.serveToggle)
 	api.HandleFunc("GET /proxy.pac", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-ns-proxy-autoconfig")
@@ -286,4 +287,18 @@ func (m *Mux) serveUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusAccepted)
 	writeJSON(w, m.Status())
+}
+
+// serveRepair re-applies routes and DNS and flushes the OS resolver cache.
+func (m *Mux) serveRepair(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-Tailmux") == "" {
+		http.Error(w, "missing X-Tailmux header", http.StatusForbidden)
+		return
+	}
+	if m.Repair == nil {
+		http.Error(w, "nothing to repair: TUN mode is off", http.StatusNotImplemented)
+		return
+	}
+	m.Repair()
+	writeJSON(w, map[string]string{"status": "repaired"})
 }

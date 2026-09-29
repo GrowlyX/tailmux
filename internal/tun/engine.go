@@ -300,6 +300,11 @@ func (e *Engine) answerDNS(query []byte) []byte {
 			tgt, err := e.m.Resolve(ctx, name)
 			cancel()
 			switch {
+			case err != nil && !mux.IsNotFound(err):
+				// A lookup that failed rather than came back empty (say the
+				// tailnet is reconnecting after sleep): SERVFAIL, which
+				// resolvers retry, not NXDOMAIN, which they cache.
+				rh.RCode = dnsmessage.RCodeServerFailure
 			case err != nil:
 				// NXDOMAIN
 			case tgt.Tailnet == "":

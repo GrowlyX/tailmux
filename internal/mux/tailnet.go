@@ -148,6 +148,12 @@ func (t *Tailnet) refresh(ctx context.Context) {
 		return
 	}
 	snap := Snapshot{Name: t.cfg.Name, Priority: t.priority, Running: st.BackendState == ipn.Running.String() && t.Enabled()}
+	// Starting after having been Running is a reconnect (sleep, network
+	// change), not a logout: keep claiming.
+	t.mu.Lock()
+	wasActive := t.snap.Running || t.snap.Reconnecting
+	t.mu.Unlock()
+	snap.Reconnecting = !snap.Running && t.Enabled() && wasActive && st.BackendState == ipn.Starting.String()
 	if st.CurrentTailnet != nil {
 		snap.Suffix = strings.Trim(st.CurrentTailnet.MagicDNSSuffix, ".")
 	}
@@ -293,7 +299,7 @@ func (t *Tailnet) Resolve(ctx context.Context, name string) ([]netip.Addr, error
 	}
 	if len(out) == 0 {
 		if firstErr == nil {
-			firstErr = fmt.Errorf("%s: no such host in tailnet %s", name, t.cfg.Name)
+			firstErr = fmt.Errorf("%s: %w in tailnet %s", name, ErrNoSuchHost, t.cfg.Name)
 		}
 		return nil, firstErr
 	}
@@ -367,6 +373,20 @@ func (t *Tailnet) owns(ip netip.Addr) bool {
 	return d.OK() || tsaddr.IsTailscaleIP(ip)
 }
 
+// ErrNoSuchHost is a definite "this name doesn't exist" from a tailnet's
+// DNS, as opposed to a lookup that failed (tailnet reconnecting, resolver
+// unreachable), which is worth retrying.
+var ErrNoSuchHost = errors.New("no such host")
+
+// IsNotFound reports whether err means the name definitely doesn't exist.
+func IsNotFound(err error) bool {
+	if errors.Is(err, ErrNoSuchHost) {
+		return true
+	}
+	var de *net.DNSError
+	return errors.As(err, &de) && de.IsNotFound
+}
+
 func cmpErr(a, b error) error {
 	if a != nil {
 		return a
@@ -381,6 +401,9 @@ func parseDNSAddrs(b []byte) ([]netip.Addr, error) {
 		return nil, err
 	}
 	if h.RCode != dnsmessage.RCodeSuccess {
+		if h.RCode == dnsmessage.RCodeNameError {
+			return nil, fmt.Errorf("dns: %w", ErrNoSuchHost)
+		}
 		return nil, fmt.Errorf("dns: %v", h.RCode)
 	}
 	if err := p.SkipAllQuestions(); err != nil {

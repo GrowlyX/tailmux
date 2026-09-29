@@ -35,6 +35,8 @@ type Mux struct {
 	// update (/status and POST /update).
 	UpdateStatus  func() any
 	TriggerUpdate func() error
+	// Repair, if set, re-applies OS routes/DNS (POST /repair).
+	Repair func()
 
 	listenMu  sync.Mutex
 	listeners []func()

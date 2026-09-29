@@ -46,6 +46,7 @@ usage:
   tailmux peers [tailnet]      every device, and the name to reach it by
   tailmux resolve <host>       which tailnet a host routes through, and why
   tailmux nc <host> <port>     pipe stdio to host:port (ssh ProxyCommand)
+  tailmux repair               re-apply routes and DNS, flush the DNS cache
   tailmux update [-check]      install the latest release (or just check)
   tailmux bar                  open the menu bar app (macOS)
   tailmux example-config       print a starter config
@@ -102,6 +103,8 @@ func main() {
 		err = up(cfg, *verbose)
 	case "status":
 		err = status(cfg)
+	case "repair":
+		err = repair(cfg)
 	case "update":
 		err = runUpdate(cfg, fs.Args())
 	case "peers":
@@ -203,6 +206,7 @@ func up(cfg *mux.Config, verbose bool) error {
 			return err
 		}
 		defer sys.Close()
+		m.Repair = func() { sys.Repair("requested") }
 		m.TUNStatus = func() any {
 			return map[string]any{"interface": sys.Interface(), "fake_range": sys.FakeIPs().Prefix().String(), "dns": sys.DNSActive()}
 		}
@@ -304,6 +308,22 @@ func status(cfg *mux.Config) error {
 			fmt.Printf("  %-20s %s -> %s (%s)\n", c.What, strings.Join(c.Tailnets, ","), c.Winner, how)
 		}
 	}
+	return nil
+}
+
+func repair(cfg *mux.Config) error {
+	req, _ := http.NewRequest("POST", "http://"+cfg.HTTP+"/repair", nil)
+	req.Header.Set("X-Tailmux", "1")
+	resp, err := (&http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{Proxy: nil}}).Do(req)
+	if err != nil {
+		return fmt.Errorf("is `tailmux up` running? %w", err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("%s", strings.TrimSpace(string(b)))
+	}
+	fmt.Println("routes and DNS re-applied, DNS cache flushed")
 	return nil
 }
 

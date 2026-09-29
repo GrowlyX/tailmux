@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/netip"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -39,7 +40,13 @@ func family(p netip.Prefix) string {
 }
 
 func (darwinOS) addRoute(ifname string, p netip.Prefix) error {
-	return run("/sbin/route", "-q", "-n", "add", family(p), "-net", p.String(), "-interface", ifname)
+	err := run("/sbin/route", "-q", "-n", "add", family(p), "-net", p.String(), "-interface", ifname)
+	if err != nil && strings.Contains(err.Error(), "File exists") {
+		// Already there: either ours (re-applying) or the official
+		// client's for the same subnet. Point it at us.
+		return run("/sbin/route", "-q", "-n", "change", family(p), "-net", p.String(), "-interface", ifname)
+	}
+	return err
 }
 
 func (darwinOS) delRoute(ifname string, p netip.Prefix) error {
@@ -67,6 +74,26 @@ func (d darwinOS) setDNS(ifname string, domains []string, server netip.Addr) (bo
 	}
 	d.removeResolvers(want)
 	return true, nil
+}
+
+func (darwinOS) dnsIntact(_ string, domains []string) bool {
+	for _, dom := range domains {
+		b, err := os.ReadFile(filepath.Join(resolverDir, dom))
+		if err != nil {
+			return false
+		}
+		if !bytes.HasPrefix(b, []byte(resolverMarker)) {
+			continue // someone else's file; setDNS leaves those alone too
+		}
+	}
+	return true
+}
+
+// flushDNS clears the system resolver cache, including failures cached
+// while tailnets were still reconnecting.
+func (darwinOS) flushDNS() {
+	exec.Command("/usr/bin/dscacheutil", "-flushcache").Run()
+	exec.Command("/usr/bin/killall", "-HUP", "mDNSResponder").Run()
 }
 
 // removeResolvers deletes tailmux's resolver files except those in keep.

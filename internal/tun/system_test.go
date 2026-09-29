@@ -165,6 +165,29 @@ func TestSystem(t *testing.T) {
 		})
 	})
 
+	t.Run("repairs what the OS dropped", func(t *testing.T) {
+		// What a sleep/wake or network change can do: routes and the
+		// per-domain DNS config vanish behind tailmux's back.
+		gone := netip.MustParsePrefix("198.51.100.128/25")
+		if err := sys.os.delRoute(sys.Interface(), gone); err != nil {
+			t.Fatal(err)
+		}
+		if runtime.GOOS == "darwin" {
+			os.Remove("/etc/resolver/bravo")
+		}
+		if c, err := net.DialTimeout("tcp", "198.51.100.137:22", 2*time.Second); err == nil {
+			c.Close()
+			t.Fatal("route removal had no effect; test is meaningless")
+		}
+		sys.Repair("test")
+		expect(t, "after repair", "bravo gw 198.51.100.137:22", func() (string, error) { return readLine("198.51.100.137:22") })
+		if runtime.GOOS == "darwin" {
+			if _, err := os.Stat("/etc/resolver/bravo"); err != nil {
+				t.Errorf("resolver file not restored: %v", err)
+			}
+		}
+	})
+
 	t.Run("system resolver", func(t *testing.T) {
 		if !sys.DNSActive() {
 			if os.Getenv("TAILMUX_TUN_E2E_REQUIRE_DNS") != "" {

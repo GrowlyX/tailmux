@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	wgtun "github.com/tailscale/wireguard-go/tun"
 
@@ -27,6 +28,10 @@ type osConfig interface {
 	// setDNS routes queries for domains (and their subdomains) to server.
 	// It reports false if the OS offers no way to do that.
 	setDNS(ifname string, domains []string, server netip.Addr) (bool, error)
+	// dnsIntact reports whether the OS still has what setDNS configured.
+	dnsIntact(ifname string, domains []string) bool
+	// flushDNS drops cached answers (including cached failures).
+	flushDNS()
 	close(ifname string) error
 }
 
@@ -88,10 +93,101 @@ func Start(ctx context.Context, m *mux.Mux, cfg *mux.Config) (*System, error) {
 			log.Printf("tun: %v", err)
 		}
 	}()
-	m.OnChange(s.reconcile)
-	s.reconcile()
+	m.OnChange(func() { s.reconcile(false) })
+	s.reconcile(false)
+	go s.watchNetwork(ctx)
 	log.Printf("tun      %s  (fake IPs %s, DNS %s)", ifname, fake.Prefix(), fake.DNS())
 	return s, nil
+}
+
+// Repair re-applies everything tailmux set up in the OS (interface
+// address, every route, the DNS configuration) and flushes the OS DNS
+// cache. The network watcher calls it after sleep and network changes;
+// `tailmux repair` calls it by hand.
+func (s *System) Repair(reason string) {
+	if reason != "" {
+		log.Printf("tun: re-applying routes and DNS (%s)", reason)
+	}
+	if err := s.os.up(s.ifname, s.fake.Gateway(), s.fake.Prefix(), s.cfg.TUN.MTU); err != nil {
+		log.Printf("tun: re-configure %s: %v", s.ifname, err)
+	}
+	s.reconcile(true)
+	s.os.flushDNS()
+}
+
+// watchNetwork notices the two events that leave the OS side stale: the
+// machine sleeping (the wall clock jumps; Go's monotonic clock doesn't
+// advance during sleep on macOS) and the network changing under us (new
+// Wi-Fi, new address). It also checks every few minutes that routes and
+// DNS are still in place.
+func (s *System) watchNetwork(ctx context.Context) {
+	const tick = 5 * time.Second
+	t := time.NewTicker(tick)
+	defer t.Stop()
+	last := time.Now().Round(0)
+	fp := netFingerprint(s.ifname)
+	lastCheck := time.Now()
+	var again <-chan time.Time
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-again:
+			// Once tailnets have reconnected, flush again so no failure
+			// cached in the meantime survives.
+			again = nil
+			s.Repair("")
+		case <-t.C:
+			now := time.Now().Round(0)
+			slept := now.Sub(last) > 6*tick
+			last = now
+			nfp := netFingerprint(s.ifname)
+			switch {
+			case slept:
+				s.Repair("woke from sleep")
+				again = time.After(20 * time.Second)
+			case nfp != fp:
+				time.Sleep(2 * time.Second) // let the new network settle
+				s.Repair("network changed")
+				again = time.After(20 * time.Second)
+			case time.Since(lastCheck) > 5*time.Minute:
+				lastCheck = time.Now()
+				s.check()
+			}
+			fp = netFingerprint(s.ifname)
+		}
+	}
+}
+
+// check is the cheap periodic version of Repair: it only rewrites DNS
+// and flushes when the OS lost the configuration.
+func (s *System) check() {
+	s.reconcile(true)
+	s.mu.Lock()
+	domains, active := s.domains, s.dnsActive
+	s.mu.Unlock()
+	if active && !s.cfg.TUN.NoDNS && !s.os.dnsIntact(s.ifname, domains) {
+		log.Printf("tun: DNS configuration was lost; restoring it")
+		s.Repair("")
+	}
+}
+
+// netFingerprint summarizes the machine's other interfaces and their
+// addresses; it changes when the network does.
+func netFingerprint(skip string) string {
+	ifs, _ := net.Interfaces()
+	var parts []string
+	for _, ifc := range ifs {
+		if ifc.Name == skip || ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, _ := ifc.Addrs()
+		for _, a := range addrs {
+			parts = append(parts, ifc.Name+"="+a.String())
+		}
+	}
+	slices.Sort(parts)
+	return strings.Join(parts, ",")
 }
 
 func (s *System) Interface() string { return s.ifname }
@@ -105,10 +201,14 @@ func (s *System) DNSActive() bool {
 }
 
 // reconcile makes the OS routes and DNS domains match what the running
-// tailnets claim.
-func (s *System) reconcile() {
+// tailnets claim. With force it re-applies routes and DNS even where it
+// believes they are already in place, in case the OS dropped them.
+func (s *System) reconcile(force bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if force {
+		clear(s.skipped) // local networks may have changed
+	}
 	r := s.m.Router()
 	prefixes, domains := r.Claims()
 	// Devices' own addresses: a name in public DNS pointing at a tailnet
@@ -149,7 +249,7 @@ func (s *System) reconcile() {
 		}
 	}
 	for p := range want {
-		if !s.routes[p] {
+		if force || !s.routes[p] {
 			if err := s.os.addRoute(s.ifname, p); err != nil {
 				log.Printf("tun: add route %s: %v", p, err)
 				continue
@@ -157,7 +257,7 @@ func (s *System) reconcile() {
 			s.routes[p] = true
 		}
 	}
-	if s.cfg.TUN.NoDNS || slices.Equal(domains, s.domains) {
+	if s.cfg.TUN.NoDNS || (!force && slices.Equal(domains, s.domains)) {
 		return
 	}
 	ok, err := s.os.setDNS(s.ifname, domains, s.fake.DNS())

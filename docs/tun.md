@@ -38,6 +38,21 @@ through the owning tailnet. So `ssh db.home`, `psql -h db.corp.internal` and
 `ping` works too. tailmux answers an echo only after the destination
 actually answered through its tailnet, so the round-trip time is real.
 
+## Sleep, wake and changing networks
+
+After the Mac wakes up or the network changes (new Wi-Fi, new address),
+tailmux does three things:
+
+- re-applies its routes and DNS configuration;
+- re-checks which subnets overlap your current LAN;
+- flushes the OS DNS cache, once right away and again 20 seconds later, after
+  the tailnets have reconnected.
+
+A tailnet that's reconnecting keeps its names and routes in the meantime.
+Lookups get a "try again" answer rather than a cached "doesn't exist".
+
+If anything ever looks stale, `tailmux repair` does the same by hand.
+
 ## Limits
 
 - Bare hostnames like `db` need a suffix in TUN mode (`db.home`), because
