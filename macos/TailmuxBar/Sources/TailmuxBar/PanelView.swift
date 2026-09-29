@@ -38,8 +38,10 @@ struct PanelView: View {
                 .renderingMode(.template)
                 .foregroundStyle(.primary)
             VStack(alignment: .leading, spacing: 1) {
-                Text("tailmux").font(.system(size: 14, weight: .semibold))
-                Text(subtitle).font(.system(size: 11)).foregroundStyle(.secondary)
+                Wordmark(size: 17)
+                if store.offline != nil {
+                    Text("Not running").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
             }
             Spacer()
             if store.offline == nil {
@@ -55,13 +57,6 @@ struct PanelView: View {
         }
     }
 
-    private var subtitle: String {
-        if store.offline != nil { return "Not running" }
-        let n = store.tailnets.count
-        var s = "\(store.runningCount) of \(n) tailnet\(n == 1 ? "" : "s") connected"
-        if let tun = store.status?.tun { s += " · \(tun.interface)" }
-        return s
-    }
 }
 
 struct CompactLabel: LabelStyle {
@@ -90,7 +85,6 @@ struct ThroughputChart: View {
             HStack {
                 Text("Throughput").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
                 Spacer()
-                Text("last 2 min").font(.system(size: 10)).foregroundStyle(.tertiary)
             }
             Chart(points) { p in
                 LineMark(x: .value("t", p.t), y: .value("rate", p.v), series: .value("tailnet", p.name))
@@ -101,10 +95,18 @@ struct ThroughputChart: View {
                     .foregroundStyle(color(p.name).opacity(0.08))
                     .interpolationMethod(.monotone)
             }
-            .chartXScale(domain: -(HistoryLen - 1)...0)
+            .chartXScale(domain: -HistoryLen...0)
             .chartYScale(domain: 0...max(peak * 1.15, 2048))
             .chartPlotStyle { $0.clipped() }
-            .chartXAxis(.hidden)
+            .chartXAxis {
+                AxisMarks(values: [-120, -90, -60, -30, 0]) { v in
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [2, 3]))
+                    // Pull the end labels ("2m", "now") inside the plot.
+                    AxisValueLabel(anchor: v.index == 0 ? .topLeading : v.index == v.count - 1 ? .topTrailing : .top) {
+                        Text(timeLabel(v.as(Int.self) ?? 0)).font(.system(size: 9))
+                    }
+                }
+            }
             .chartYAxis {
                 AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) { v in
                     AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [2, 3]))
@@ -286,9 +288,11 @@ struct FooterView: View {
             }
             Spacer()
             Text("Quit")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .contentShape(Rectangle())
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12).padding(.vertical, 4)
+                .background(Capsule().fill(Color(red: 0.90, green: 0.26, blue: 0.24)))
+                .contentShape(Capsule())
                 .onTapGesture { NSApp.terminate(nil) }
         }
     }
@@ -358,5 +362,24 @@ struct UpdateBanner: View {
         if info.state == "failed" { return info.error ?? "" }
         if info.state == "installing" { return "Homebrew builds it from source; this takes a minute or two." }
         return "You have \(info.current)." + (info.auto ? " It installs itself automatically too." : "")
+    }
+}
+
+/// "tail" light, "mux" bold.
+struct Wordmark: View {
+    var size: CGFloat
+
+    var body: some View {
+        (Text("tail").font(.system(size: size, weight: .light))
+            + Text("mux").font(.system(size: size, weight: .bold)))
+            .tracking(-0.2)
+    }
+}
+
+private func timeLabel(_ secondsAgo: Int) -> String {
+    switch -secondsAgo {
+    case 0: return "now"
+    case let s where s % 60 == 0: return "\(s / 60)m"
+    case let s: return "\(s)s"
     }
 }

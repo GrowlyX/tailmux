@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="240" viewBox="0 0 960 240" role="img" aria-label="tailmux: be on all your tailnets at once">
+  <rect width="960" height="240" rx="20" fill="#2e3035"/>
+    <circle cx="179" cy="76" r="15" fill="#ffffff" fill-opacity="1"/>
+  <circle cx="223" cy="76" r="15" fill="#ffffff" fill-opacity="1"/>
+  <circle cx="267" cy="76" r="15" fill="#ffffff" fill-opacity="1"/>
+  <circle cx="179" cy="120" r="15" fill="#ffffff" fill-opacity="0.28"/>
+  <circle cx="223" cy="120" r="15" fill="#ffffff" fill-opacity="1"/>
+  <circle cx="267" cy="120" r="15" fill="#ffffff" fill-opacity="0.28"/>
+  <circle cx="179" cy="164" r="15" fill="#ffffff" fill-opacity="0.28"/>
+  <circle cx="223" cy="164" r="15" fill="#ffffff" fill-opacity="1"/>
+  <circle cx="267" cy="164" r="15" fill="#ffffff" fill-opacity="0.28"/>
+  <text x="344" y="128" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="76" fill="#ffffff" letter-spacing="-1"><tspan font-weight="300">tail</tspan><tspan font-weight="700">mux</tspan></text>
+  <text x="348" y="170" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="24" fill="#aeb3bb">Be on all your tailnets at once.</text>
+</svg>

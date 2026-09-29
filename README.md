@@ -1,11 +1,21 @@
-# tailmux
+<p align="center">
+  <img src="docs/banner.svg" alt="tailmux: be on all your tailnets at once" width="720">
+</p>
 
-[![CI](https://github.com/GrowlyX/tailmux/actions/workflows/ci.yml/badge.svg)](https://github.com/GrowlyX/tailmux/actions/workflows/ci.yml)
+<p align="center">
+  <a href="https://github.com/GrowlyX/tailmux/actions/workflows/ci.yml"><img src="https://github.com/GrowlyX/tailmux/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/GrowlyX/tailmux/releases/latest"><img src="https://img.shields.io/github/v/release/GrowlyX/tailmux" alt="latest release"></a>
+</p>
 
-**Be on all your tailnets at once.** Tailscale's client joins one tailnet at a time;
-tailmux joins them all and sends each connection to the tailnet that owns it.
+Tailscale's client joins one tailnet at a time. tailmux joins them all and sends
+each connection to the tailnet that owns it.
 
-<img src="docs/panel-dark.png" width="340" alt="tailmux menu bar">
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/panel-dark.png">
+    <img src="docs/panel-light.png" width="372" alt="tailmux menu bar: four tailnets with switches and live throughput">
+  </picture>
+</p>
 
 ```sh
 brew install growlyx/tap/tailmux
