@@ -38,7 +38,8 @@ func TestLab(t *testing.T) {
 			{"name": "bravo", "control_url": bravo.URL, "ephemeral": true},
 			{"name": "charlie", "control_url": charlie.URL, "ephemeral": true},
 		},
-		"pins": map[string]string{"192.0.2.128/25": "bravo"},
+		"pins":    map[string]string{"192.0.2.128/25": "bravo"},
+		"updates": map[string]bool{"check": false},
 	}
 	b, _ := json.MarshalIndent(cfg, "", "  ")
 	if err := os.WriteFile(out, b, 0o644); err != nil {

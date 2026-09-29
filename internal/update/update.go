@@ -6,7 +6,9 @@ package update
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bufio"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -86,6 +88,9 @@ func Newer(current, latest string) bool {
 	c, l := "v"+strings.TrimPrefix(current, "v"), "v"+strings.TrimPrefix(latest, "v")
 	if !semver.IsValid(c) || !semver.IsValid(l) {
 		return false
+	}
+	if semver.MajorMinor(c) == "v0.0" && semver.Compare(c, "v0.0.1") < 0 {
+		return false // 0.0.0-something: a CI or local build, never replaced
 	}
 	return semver.Compare(l, c) > 0
 }
@@ -167,7 +172,11 @@ func lastLines(s string, n int) string {
 // installBinary downloads the release archive for this platform, checks
 // it against checksums.txt, and atomically replaces exe.
 func installBinary(ctx context.Context, rel *Release, exe string, logf func(string, ...any)) error {
-	name := fmt.Sprintf("tailmux_%s_%s_%s.tar.gz", rel.Version(), runtime.GOOS, runtime.GOARCH)
+	ext, binName := "tar.gz", "tailmux"
+	if runtime.GOOS == "windows" {
+		ext, binName = "zip", "tailmux.exe"
+	}
+	name := fmt.Sprintf("tailmux_%s_%s_%s.%s", rel.Version(), runtime.GOOS, runtime.GOARCH, ext)
 	var archiveURL, sumsURL string
 	for _, a := range rel.Assets {
 		switch a.Name {
@@ -202,7 +211,7 @@ func installBinary(ctx context.Context, rel *Release, exe string, logf func(stri
 	if got := sha256.Sum256(archive); hex.EncodeToString(got[:]) != want {
 		return fmt.Errorf("%s: checksum mismatch", name)
 	}
-	bin, err := extract(archive, "tailmux")
+	bin, err := extract(archive, binName)
 	if err != nil {
 		return err
 	}
@@ -240,6 +249,9 @@ func fetch(ctx context.Context, url string) ([]byte, error) {
 }
 
 func extract(archive []byte, want string) ([]byte, error) {
+	if bytes.HasPrefix(archive, []byte("PK\x03\x04")) {
+		return extractZip(archive, want)
+	}
 	zr, err := gzip.NewReader(strings.NewReader(string(archive)))
 	if err != nil {
 		return nil, err
@@ -257,4 +269,23 @@ func extract(archive []byte, want string) ([]byte, error) {
 			return io.ReadAll(io.LimitReader(tr, 256<<20))
 		}
 	}
+}
+
+func extractZip(archive []byte, want string) ([]byte, error) {
+	zr, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range zr.File {
+		if filepath.Base(f.Name) != want || f.FileInfo().IsDir() {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return nil, err
+		}
+		defer rc.Close()
+		return io.ReadAll(io.LimitReader(rc, 256<<20))
+	}
+	return nil, fmt.Errorf("archive has no %s", want)
 }

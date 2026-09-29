@@ -192,11 +192,23 @@ jobs:
           ./tailmux up -config lab.json > up.log 2>&1 &
           for _ in $(seq 1 60); do curl -sf http://127.0.0.1:21056/status && break; sleep 1; done
           for n in alpha bravo charlie; do curl -sf --socks5-hostname 127.0.0.1:21055 "http://web.$n/?bytes=3000000" > /dev/null; done
+          # Keep traffic flowing so the charts in the screenshots have lines.
+          (
+            for i in $(seq 1 900); do
+              for n in alpha bravo charlie; do
+                curl -s --socks5-hostname 127.0.0.1:21055 "http://web.$n/?bytes=$(( (i % 5 + 1) * 150000 ))" > /dev/null &
+              done
+              sleep 1
+            done
+          ) &
       - name: app API tests against the daemon
         working-directory: desktop/src-tauri
         env:
           TAILMUX_API: http://127.0.0.1:21056
-        run: cargo test --release --test api
+        # Own target dir: a plain cargo build of the release binary would
+        # replace the bundled one (built with the frontend embedded) with a
+        # dev build that loads localhost:1420.
+        run: cargo test --release --test api --target-dir target/api-tests
       - name: screenshots of every view
         working-directory: desktop
         env:

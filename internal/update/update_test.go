@@ -2,6 +2,7 @@ package update
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -31,6 +32,8 @@ func TestNewer(t *testing.T) {
 		{"0.1.0", "garbage", false},
 		{"0.1.0", "0.1.1-rc.1", true},
 		{"0.1.1-rc.1", "0.1.1", true},
+		{"0.0.0-ci", "0.1.6", false}, // CI/local builds stay put
+		{"0.0.0", "0.1.6", false},
 	} {
 		if got := Newer(c.cur, c.latest); got != c.want {
 			t.Errorf("Newer(%q, %q) = %v", c.cur, c.latest, got)
@@ -197,5 +200,19 @@ func TestInstallRechecks(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(exe); string(b) != "NEW" {
 		t.Fatalf("stale check: exe = %q", b)
+	}
+}
+
+func TestExtractZip(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, _ := zw.Create("README.md")
+	w.Write([]byte("hi"))
+	w, _ = zw.Create("tailmux.exe")
+	w.Write([]byte("EXE"))
+	zw.Close()
+	got, err := extract(buf.Bytes(), "tailmux.exe")
+	if err != nil || string(got) != "EXE" {
+		t.Fatalf("%q %v", got, err)
 	}
 }
