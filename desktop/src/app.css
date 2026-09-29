@@ -1,0 +1,88 @@
+/* Theme tokens follow the OS. Overlays use rgb(var(--fg-rgb) / a) the
+   way the macOS app uses Color.primary.opacity(a). */
+:root {
+  color-scheme: light dark;
+  --fg-rgb: 0 0 0;
+  --fg: #1d1d1f;
+  --fg-2: rgb(var(--fg-rgb) / 0.55);
+  --fg-3: rgb(var(--fg-rgb) / 0.3);
+  --bg: #ececec;
+  --sidebar: #e3e3e6;
+  --accent: #0a7aff;
+  --green: #28a745;
+  --orange: #e8890c;
+  --red: rgb(230, 66, 61);
+  --field: rgb(255 255 255 / 0.85);
+  --field-border: rgb(0 0 0 / 0.12);
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", system-ui, Ubuntu, Cantarell, "Noto Sans", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg-rgb: 255 255 255;
+    --fg: #f0f0f2;
+    --fg-2: rgb(var(--fg-rgb) / 0.58);
+    --fg-3: rgb(var(--fg-rgb) / 0.32);
+    --bg: #1f1f21;
+    --sidebar: #29292c;
+    --accent: #2f8cff;
+    --green: #34c759;
+    --orange: #ff9f0a;
+    --field: rgb(255 255 255 / 0.07);
+    --field-border: rgb(255 255 255 / 0.14);
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+  overflow: hidden;
+}
+#app { height: 100%; }
+button, input { font: inherit; color: inherit; }
+button { cursor: default; }
+.mono { font-family: var(--mono); }
+.num { font-variant-numeric: tabular-nums; }
+.secondary { color: var(--fg-2); }
+.tertiary { color: var(--fg-3); }
+.selectable { user-select: text; cursor: text; }
+
+/* Rounded cards: Color.primary.opacity(0.04). */
+.card { background: rgb(var(--fg-rgb) / 0.04); border-radius: 10px; }
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 12px; border-radius: 6px; border: 1px solid var(--field-border);
+  background: var(--field); font-size: 12px; line-height: 18px; white-space: nowrap;
+}
+.btn:hover { background: rgb(var(--fg-rgb) / 0.08); }
+.btn:disabled { opacity: 0.5; }
+.btn.prominent { background: var(--accent); border-color: transparent; color: #fff; font-weight: 500; }
+.btn.prominent:hover { filter: brightness(1.08); }
+.btn.plain { background: none; border-color: transparent; }
+.btn.plain:hover { background: rgb(var(--fg-rgb) / 0.06); }
+.btn.danger { color: var(--red); }
+
+/* Fields */
+.field {
+  width: 100%; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--field-border);
+  background: var(--field); font-size: 13px; outline: none; user-select: text; cursor: text;
+}
+.field:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgb(10 122 255 / 0.2); }
+.field::placeholder { color: var(--fg-3); }
+
+/* Scrollbars stay slim like on macOS. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: rgb(var(--fg-rgb) / 0.2); border-radius: 6px; border: 3px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-track { background: transparent; }
+
+dialog { border: none; padding: 0; background: transparent; color: inherit; }
+dialog::backdrop { background: rgb(0 0 0 / 0.25); }
