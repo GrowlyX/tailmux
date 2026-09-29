@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/banner.svg" alt="tailmux: be on all your tailnets at once" width="720">
+  <img src="docs/banner.svg" alt="tailmux: be on all your tailnets at once, next to its menu bar panel showing four tailnets with switches and live throughput" width="100%">
 </p>
 
 <p align="center">
@@ -9,13 +9,6 @@
 
 Tailscale's client joins one tailnet at a time. tailmux joins them all and sends
 each connection to the tailnet that owns it.
-
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/panel-dark.png">
-    <img src="docs/panel-light.png" width="372" alt="tailmux menu bar: four tailnets with switches and live throughput">
-  </picture>
-</p>
 
 ```sh
 brew install growlyx/tap/tailmux

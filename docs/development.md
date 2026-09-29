@@ -46,3 +46,16 @@ Push a `v*` tag. The release workflow then:
 4. pushes the formula to [GrowlyX/homebrew-tap](https://github.com/GrowlyX/homebrew-tap)
    using the `TAP_DEPLOY_KEY` deploy key;
 5. installs from the tap on a clean macOS runner.
+
+## The README banner
+
+`docs/banner.svg` is generated. Rebuild it after refreshing `docs/panel-dark.png`
+(`TailmuxBar --snapshot docs/panel-dark.png --dark`):
+
+```sh
+pip install fonttools brotli
+scripts/banner.py --font path/to/Satoshi-Variable.woff2
+```
+
+Satoshi isn't in the repo because its license doesn't allow redistribution.
+The script turns the text into outlines, so the SVG doesn't need the font.
