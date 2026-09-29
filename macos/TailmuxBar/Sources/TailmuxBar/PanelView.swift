@@ -25,8 +25,6 @@ struct PanelView: View {
                     }
                 }
             }
-            Divider().opacity(0.5)
-            FooterView(store: store, snapshot: snapshot)
         }
         .padding(14)
         .frame(width: 372)
@@ -53,6 +51,14 @@ struct PanelView: View {
                 .labelStyle(CompactLabel())
                 .font(.system(size: 11).monospacedDigit())
                 .foregroundStyle(.secondary)
+            }
+            HStack(spacing: 2) {
+                HeaderButton(symbol: "gearshape.fill", help: "Open tailmux") {
+                    if !snapshot { MainWindowController.shared.show(store: store) }
+                }
+                HeaderButton(symbol: "door.left.hand.open", help: "Quit the menu bar app") {
+                    if !snapshot { NSApp.terminate(nil) }
+                }
             }
         }
     }
@@ -276,46 +282,6 @@ struct OfflineView: View {
     }
 }
 
-struct FooterView: View {
-    @ObservedObject var store: Store
-    var snapshot: Bool
-    @StateObject private var loginItem = Flag(SMAppService.mainApp.status == .enabled)
-
-    var body: some View {
-        HStack {
-            HStack(spacing: 8) {
-                PillSwitch(isOn: loginItem.on, tint: .accentColor) { toggleLogin() }
-                    .scaleEffect(0.85)
-                Text("Open at login").font(.system(size: 12))
-            }
-            Spacer()
-            Text("Open tailmux")
-                .font(.system(size: 11, weight: .semibold))
-                .padding(.horizontal, 12).padding(.vertical, 4)
-                .background(Capsule().fill(Color.primary.opacity(0.1)))
-                .contentShape(Capsule())
-                .onTapGesture { if !snapshot { MainWindowController.shared.show(store: store) } }
-            Text("Quit")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 12).padding(.vertical, 4)
-                .background(Capsule().fill(Color(red: 0.90, green: 0.26, blue: 0.24)))
-                .contentShape(Capsule())
-                .onTapGesture { NSApp.terminate(nil) }
-        }
-    }
-
-    private func toggleLogin() {
-        guard !snapshot else { return }
-        do {
-            if loginItem.on { try SMAppService.mainApp.unregister() } else { try SMAppService.mainApp.register() }
-        } catch {
-            NSLog("tailmux: login item: \(error)")
-        }
-        loginItem.on = SMAppService.mainApp.status == .enabled
-    }
-}
-
 final class Flag: ObservableObject {
     @Published var on: Bool
     init(_ on: Bool = false) { self.on = on }
@@ -389,5 +355,25 @@ private func timeLabel(_ secondsAgo: Int) -> String {
     case 0: return "now"
     case let s where s % 60 == 0: return "\(s / 60)m"
     case let s: return "\(s)s"
+    }
+}
+
+/// A small icon button for the panel header, with a hover highlight.
+struct HeaderButton: View {
+    var symbol: String
+    var help: String
+    var action: () -> Void
+    @StateObject private var hover = Flag()
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 14, weight: .medium))
+            .foregroundStyle(hover.on ? Color.primary : Color.secondary)
+            .frame(width: 28, height: 28)
+            .background(Circle().fill(Color.primary.opacity(hover.on ? 0.1 : 0)))
+            .contentShape(Circle())
+            .onHover { hover.on = $0 }
+            .onTapGesture(perform: action)
+            .help(help)
     }
 }
