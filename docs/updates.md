@@ -17,6 +17,12 @@ re-executes the new binary. That happens whether the update came from
 tailmux, the menu bar, `brew upgrade` or anything else. There's no sudo
 prompt and no `brew services restart`.
 
+Starting the service with `sudo brew services start` makes Homebrew's copy
+of tailmux root-owned, so a later non-root `brew upgrade` can't delete the
+old version. When tailmux runs as root it removes those old versions itself
+(everything except the running one and the one Homebrew links), like
+`brew cleanup` would.
+
 ## Doing it by hand
 
 ```sh

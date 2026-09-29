@@ -217,6 +217,11 @@ func up(cfg *mux.Config, verbose bool) error {
 	// binary we were started as changes, shut down cleanly and re-exec.
 	restart := make(chan struct{})
 	invoked := update.InvokedPath()
+	if exe, err := filepath.EvalSymlinks(invoked); err == nil {
+		if err := update.CleanupOldKegs(exe, func(f string, a ...any) { log.Printf("update: "+f, a...) }); err != nil {
+			log.Printf("update: %v", err)
+		}
+	}
 	if cfg.Updates.CheckEnabled() {
 		um := update.NewManager(version, cfg.Updates.AutoEnabled())
 		m.UpdateStatus = func() any { return um.Status() }
