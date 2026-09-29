@@ -64,20 +64,33 @@ func TestDetect(t *testing.T) {
 // "tailmux" file with body, and checksums.txt (optionally wrong).
 func fakeRelease(t *testing.T, version string, body []byte, badSum bool) *httptest.Server {
 	t.Helper()
+	// What GoReleaser publishes: a .zip with tailmux.exe on Windows, a
+	// .tar.gz with tailmux elsewhere.
 	var buf bytes.Buffer
-	zw := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(zw)
-	for _, f := range []struct {
-		name string
-		data []byte
-	}{{"README.md", []byte("hi")}, {"tailmux", body}} {
-		tw.WriteHeader(&tar.Header{Name: f.name, Mode: 0o755, Size: int64(len(f.data)), Typeflag: tar.TypeReg})
-		tw.Write(f.data)
+	ext := "tar.gz"
+	if runtime.GOOS == "windows" {
+		ext = "zip"
+		zw := zip.NewWriter(&buf)
+		w, _ := zw.Create("README.md")
+		w.Write([]byte("hi"))
+		w, _ = zw.Create("tailmux.exe")
+		w.Write(body)
+		zw.Close()
+	} else {
+		zw := gzip.NewWriter(&buf)
+		tw := tar.NewWriter(zw)
+		for _, f := range []struct {
+			name string
+			data []byte
+		}{{"README.md", []byte("hi")}, {"tailmux", body}} {
+			tw.WriteHeader(&tar.Header{Name: f.name, Mode: 0o755, Size: int64(len(f.data)), Typeflag: tar.TypeReg})
+			tw.Write(f.data)
+		}
+		tw.Close()
+		zw.Close()
 	}
-	tw.Close()
-	zw.Close()
 	archive := buf.Bytes()
-	name := fmt.Sprintf("tailmux_%s_%s_%s.tar.gz", version, runtime.GOOS, runtime.GOARCH)
+	name := fmt.Sprintf("tailmux_%s_%s_%s.%s", version, runtime.GOOS, runtime.GOARCH, ext)
 	sum := sha256.Sum256(archive)
 	sumHex := hex.EncodeToString(sum[:])
 	if badSum {

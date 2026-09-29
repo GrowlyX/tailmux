@@ -190,8 +190,13 @@ jobs:
           TAILMUX_LAB="$PWD/lab.json" go test ./internal/mux -run TestLab -timeout 0 > lab.log 2>&1 &
           for _ in $(seq 1 120); do [ -f lab.json.ready ] && break; sleep 2; done
           ./tailmux up -config lab.json > up.log 2>&1 &
-          for _ in $(seq 1 60); do curl -sf http://127.0.0.1:21056/status && break; sleep 1; done
-          for n in alpha bravo charlie; do curl -sf --socks5-hostname 127.0.0.1:21055 "http://web.$n/?bytes=3000000" > /dev/null; done
+          # The API answers before the tailnets connect; wait for all three.
+          for _ in $(seq 1 120); do
+            [ "$(curl -sf http://127.0.0.1:21056/status | grep -c '"state": "Running"')" = 3 ] && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:21056/status
+          for n in alpha bravo charlie; do curl -sf --retry 10 --retry-all-errors --socks5-hostname 127.0.0.1:21055 "http://web.$n/?bytes=3000000" > /dev/null; done
           # Keep traffic flowing so the charts in the screenshots have lines.
           (
             for i in $(seq 1 900); do
