@@ -47,6 +47,8 @@ usage:
   tailmux peers [tailnet]      every device, and the name to reach it by
   tailmux resolve <host>       which tailnet a host routes through, and why
   tailmux nc <host> <port>     pipe stdio to host:port (ssh ProxyCommand)
+  tailmux service install      run tailmux as a system service (Linux, Windows; needs root/admin)
+  tailmux service uninstall|status
   tailmux repair               re-apply routes and DNS, flush the DNS cache
   tailmux update [-check]      install the latest release (or just check)
   tailmux bar                  open the menu bar app (macOS)
@@ -63,6 +65,7 @@ func main() {
 	cfgPath := fs.String("config", configPath(), "config file")
 	verbose := fs.Bool("v", false, "verbose tailscale logs")
 	tunFlag := fs.Bool("tun", false, "route tailnet traffic for every app through a TUN device (needs root)")
+	stateDir := fs.String("state-dir", "", "where logins live (overrides the config)")
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 
 	args := os.Args[1:]
@@ -72,6 +75,9 @@ func main() {
 	}
 	fs.Parse(args)
 
+	if *stateDir != "" {
+		os.Setenv("TAILMUX_STATE_DIR", *stateDir)
+	}
 	mux.Version = version
 	switch cmd {
 	case "example-config":
@@ -90,6 +96,11 @@ func main() {
 			log.Fatal(err)
 		}
 		return
+	case "service":
+		if err := runService(fs.Args()); err != nil {
+			log.Fatal(err)
+		}
+		return
 	}
 	cfg, err := mux.LoadConfig(*cfgPath)
 	if err != nil {
@@ -101,7 +112,15 @@ func main() {
 		if *tunFlag {
 			cfg.TUN.Enabled = true
 		}
-		err = up(cfg, *cfgPath, *verbose)
+		if isService() {
+			// Started by the Windows service manager: it stops us, and
+			// restarts us after an update.
+			err = runAsService(func(ctx context.Context) error { return up(ctx, cfg, *cfgPath, *verbose) })
+			break
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		err = up(ctx, cfg, *cfgPath, *verbose)
+		stop()
 	case "status":
 		err = status(cfg)
 	case "repair":
@@ -164,15 +183,21 @@ func configPath() string {
 		return defaultConfig
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "tailmux", "config.json")
+	user := filepath.Join(home, ".config", "tailmux", "config.json")
+	if _, err := os.Stat(user); err == nil {
+		return user
+	}
+	// No personal config: use the system service's, if there is one.
+	if _, err := os.Stat(systemConfigPath()); err == nil {
+		return systemConfigPath()
+	}
+	return user
 }
 
-func up(cfg *mux.Config, cfgPath string, verbose bool) error {
-	if cfg.TUN.Enabled && os.Geteuid() != 0 {
-		return fmt.Errorf("tun mode needs root: sudo tailmux up -tun (or `sudo brew services start tailmux`)")
+func up(ctx context.Context, cfg *mux.Config, cfgPath string, verbose bool) error {
+	if cfg.TUN.Enabled && !privileged() {
+		return fmt.Errorf("tun mode needs root (Administrator on Windows): `sudo tailmux up -tun`, or install the service with `tailmux service install`")
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	log.SetOutput(io.MultiWriter(os.Stderr, mux.Logs))
 	m := mux.New(cfg, mux.Options{Verbose: verbose})

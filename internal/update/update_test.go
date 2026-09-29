@@ -39,6 +39,9 @@ func TestNewer(t *testing.T) {
 }
 
 func TestDetect(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Homebrew paths and symlinks")
+	}
 	prefix := t.TempDir()
 	os.MkdirAll(filepath.Join(prefix, "bin"), 0o755)
 	os.WriteFile(filepath.Join(prefix, "bin", "brew"), nil, 0o755)
@@ -149,6 +152,9 @@ func TestManager(t *testing.T) {
 }
 
 func TestWatchExecutable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Homebrew paths and symlinks")
+	}
 	dir := t.TempDir()
 	a, b := filepath.Join(dir, "a"), filepath.Join(dir, "b")
 	os.WriteFile(a, []byte("a"), 0o755)

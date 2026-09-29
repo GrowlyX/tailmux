@@ -3,11 +3,15 @@ package update
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 )
 
 func TestCleanupOldKegs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Homebrew paths and symlinks")
+	}
 	prefix := t.TempDir()
 	cellar := filepath.Join(prefix, "Cellar", "tailmux")
 	for _, v := range []string{"0.1.0", "0.1.1", "0.1.2", "0.1.3"} {

@@ -28,8 +28,8 @@ func TestSystem(t *testing.T) {
 	if os.Getenv("TAILMUX_TUN_E2E") == "" {
 		t.Skip("set TAILMUX_TUN_E2E=1 and run as root")
 	}
-	if os.Geteuid() != 0 {
-		t.Fatal("TestSystem needs root")
+	if !isAdmin() {
+		t.Fatal("TestSystem needs root (Administrator on Windows)")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
@@ -153,11 +153,16 @@ func TestSystem(t *testing.T) {
 	t.Run("ping over the kernel", func(t *testing.T) {
 		ip := fakeFor("web.charlie.")
 		lab.Eventually(t, "ping web.charlie", 60*time.Second, func() error {
-			wait := []string{"-W", "5"} // Linux: seconds
-			if runtime.GOOS == "darwin" {
-				wait = []string{"-t", "5"}
+			var args []string
+			switch runtime.GOOS {
+			case "darwin":
+				args = []string{"-c", "1", "-t", "5"}
+			case "windows":
+				args = []string{"-n", "1", "-w", "5000"}
+			default:
+				args = []string{"-c", "1", "-W", "5"}
 			}
-			out, err := exec.Command("ping", append([]string{"-c", "1"}, append(wait, ip.String())...)...).CombinedOutput()
+			out, err := exec.Command("ping", append(args, ip.String())...).CombinedOutput()
 			if err != nil {
 				return fmt.Errorf("%v: %s", err, out)
 			}

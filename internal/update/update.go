@@ -106,8 +106,11 @@ func Detect(exe string) (m Method, brew string) {
 			return MethodBrew, brew
 		}
 	}
-	if strings.Contains(exe, "/go-build") || strings.HasPrefix(filepath.Base(exe), "__debug") {
+	if strings.Contains(exe, "go-build") || strings.HasPrefix(filepath.Base(exe), "__debug") {
 		return MethodNone, "" // go run / debugger
+	}
+	if strings.HasPrefix(exe, "/usr/bin/") {
+		return MethodNone, "" // a distro package: its package manager updates it
 	}
 	return MethodBinary, ""
 }
@@ -124,7 +127,7 @@ func Install(ctx context.Context, rel *Release, exe string, logf func(string, ..
 	case MethodBinary:
 		return installBinary(ctx, rel, exe, logf)
 	default:
-		return errors.New("this build can't update itself (dev build)")
+		return errors.New("this copy can't update itself (a dev build, or installed by a package manager: update it there)")
 	}
 }
 
@@ -206,6 +209,14 @@ func installBinary(ctx context.Context, rel *Release, exe string, logf func(stri
 	tmp := exe + ".new"
 	if err := os.WriteFile(tmp, bin, 0o755); err != nil {
 		return fmt.Errorf("write %s (need sudo?): %w", tmp, err)
+	}
+	if runtime.GOOS == "windows" {
+		// A running .exe can't be overwritten, only renamed aside.
+		os.Remove(exe + ".old")
+		if err := os.Rename(exe, exe+".old"); err != nil {
+			os.Remove(tmp)
+			return err
+		}
 	}
 	if err := os.Rename(tmp, exe); err != nil {
 		os.Remove(tmp)

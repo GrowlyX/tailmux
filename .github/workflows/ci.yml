@@ -39,8 +39,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -61,8 +64,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -70,12 +76,60 @@ jobs:
           go-version-file: go.mod
       - run: go test -c -o tun.test ./internal/tun
       - name: TestSystem as root
+        if: runner.os != 'Windows'
         run: sudo TAILMUX_TUN_E2E=1 TAILMUX_TUN_E2E_REQUIRE_DNS=1 ./tun.test -test.run TestSystem -test.v -test.timeout 10m
+      - name: TestSystem as Administrator (Wintun, NRPT)
+        if: runner.os == 'Windows'
+        run: |
+          scripts/fetch-wintun.sh .
+          mv tun.test tun.test.exe
+          TAILMUX_TUN_E2E=1 TAILMUX_TUN_E2E_REQUIRE_DNS=1 ./tun.test.exe -test.run TestSystem -test.v -test.timeout 10m
       - name: nothing left behind
         if: always()
         run: |
           if [ "$RUNNER_OS" = macOS ] && grep -rl "managed by tailmux" /etc/resolver 2>/dev/null; then exit 1; fi
           if [ "$RUNNER_OS" = Linux ] && ip link show tailmux0 2>/dev/null; then exit 1; fi
+          if [ "$RUNNER_OS" = Windows ] && reg query 'HKLM\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters\DnsPolicyConfig' 2>/dev/null | grep -i tailmux; then exit 1; fi
+
+  # `tailmux service install` for real: systemd on Linux, the service
+  # manager on Windows. The service must come up, answer on its API with
+  # the starter config's tailnets, run TUN mode, and uninstall cleanly.
+  service:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: build
+        run: |
+          mkdir -p out
+          ext=""
+          if [ "$RUNNER_OS" = Windows ]; then ext=.exe; fi
+          go build -ldflags "-X main.version=0.0.0-ci" -o "out/tailmux$ext" ./cmd/tailmux
+          if [ "$RUNNER_OS" = Windows ]; then scripts/fetch-wintun.sh out; fi
+      - name: install
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then out/tailmux.exe service install; else sudo out/tailmux service install; fi
+      - name: running, answering, in TUN mode
+        run: |
+          for _ in $(seq 1 60); do curl -sf http://127.0.0.1:1056/status > status.json && break; sleep 1; done
+          cat status.json
+          for n in work home lab; do grep -q "\"name\": \"$n\"" status.json || { echo "tailnet $n missing"; exit 1; }; done
+          grep -q '"interface"' status.json || { echo "TUN mode is not up"; exit 1; }
+          if [ "$RUNNER_OS" = Windows ]; then out/tailmux.exe service status; else out/tailmux service status; fi
+      - name: uninstall
+        if: always()
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then out/tailmux.exe service uninstall; else sudo out/tailmux service uninstall; fi
+          if curl -sf --max-time 3 http://127.0.0.1:1056/status; then echo "still running after uninstall"; exit 1; fi
 
   # The menu bar app, built and rendered against a live daemon.
   menubar:
