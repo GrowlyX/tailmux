@@ -42,16 +42,6 @@ struct PanelView: View {
                 }
             }
             Spacer()
-            if store.offline == nil {
-                let r = store.totalRate
-                VStack(alignment: .trailing, spacing: 1) {
-                    Label(formatRate(r.rx), systemImage: "arrow.down")
-                    Label(formatRate(r.tx), systemImage: "arrow.up")
-                }
-                .labelStyle(CompactLabel())
-                .font(.system(size: 11).monospacedDigit())
-                .foregroundStyle(.secondary)
-            }
             HStack(spacing: 2) {
                 HeaderButton(symbol: "gearshape.fill", help: "Open tailmux") {
                     if !snapshot { MainWindowController.shared.show(store: store) }
@@ -63,15 +53,6 @@ struct PanelView: View {
         }
     }
 
-}
-
-struct CompactLabel: LabelStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 3) {
-            configuration.title
-            configuration.icon.font(.system(size: 8, weight: .bold))
-        }
-    }
 }
 
 struct ThroughputChart: View {
