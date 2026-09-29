@@ -21,7 +21,9 @@
     "targets": "all",
     "category": "Utility",
     "shortDescription": "Many tailnets at once",
-    "externalBin": ["binaries/tailmux"],
+    "externalBin": [
+      "binaries/tailmux"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -30,10 +32,17 @@
       "icons/icon.ico"
     ],
     "linux": {
-      "deb": { "depends": ["policykit-1"] }
+      "deb": {
+        "depends": [
+          "policykit-1"
+        ]
+      }
     },
     "windows": {
-      "nsis": { "installMode": "currentUser" }
+      "nsis": {
+        "installMode": "currentUser"
+      }
     }
-  }
+  },
+  "mainBinaryName": "tailmux-desktop"
 }

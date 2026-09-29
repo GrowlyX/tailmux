@@ -2,7 +2,7 @@
 name = "tailmux-desktop"
 version = "0.0.0"
 description = "tailmux tray app for Windows and Linux"
-license = "MIT"
+license = "BSD-3-Clause"
 edition = "2021"
 rust-version = "1.77"
 
