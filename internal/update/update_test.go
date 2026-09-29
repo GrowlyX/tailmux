@@ -125,8 +125,8 @@ func TestInstallBinary(t *testing.T) {
 	if b, _ := os.ReadFile(exe); string(b) != "NEW" {
 		t.Fatalf("exe = %q", b)
 	}
-	if st, _ := os.Stat(exe); st.Mode().Perm()&0o111 == 0 {
-		t.Fatal("not executable")
+	if st, _ := os.Stat(exe); runtime.GOOS != "windows" && st.Mode().Perm()&0o111 == 0 {
+		t.Fatal("not executable") // Windows has no executable bit
 	}
 }
 

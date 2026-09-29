@@ -120,11 +120,18 @@ jobs:
           if [ "$RUNNER_OS" = Windows ]; then out/tailmux.exe service install; else sudo out/tailmux service install; fi
       - name: running, answering, in TUN mode
         run: |
-          for _ in $(seq 1 60); do curl -sf http://127.0.0.1:1056/status > status.json && break; sleep 1; done
+          # The API answers before TUN is up; wait for the interface.
+          for _ in $(seq 1 90); do
+            curl -sf http://127.0.0.1:1056/status > status.json && grep -q '"interface"' status.json && break
+            sleep 1
+          done
           cat status.json
           for n in work home lab; do grep -q "\"name\": \"$n\"" status.json || { echo "tailnet $n missing"; exit 1; }; done
           grep -q '"interface"' status.json || { echo "TUN mode is not up"; exit 1; }
           if [ "$RUNNER_OS" = Windows ]; then out/tailmux.exe service status; else out/tailmux service status; fi
+      - name: service log
+        if: failure()
+        run: curl -sf "http://127.0.0.1:1056/logs?n=200" | tr ',' '\n' | tail -80 || true
       - name: uninstall
         if: always()
         run: |

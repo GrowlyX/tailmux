@@ -9,6 +9,8 @@ require (
 	github.com/tailscale/wireguard-go v0.0.0-20260715223240-2e01ba5b00f0
 	golang.org/x/mod v0.41.0
 	golang.org/x/net v0.59.0
+	golang.org/x/sys v0.48.0
+	golang.zx2c4.com/wireguard/windows v0.5.3
 	gvisor.dev/gvisor v0.0.0-20260224225140-573d5e7127a8
 	tailscale.com v1.102.5
 )
@@ -82,8 +84,6 @@ require (
 	github.com/kortschak/wol v0.0.0-20200729010619-da482cc4850a // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
-	github.com/lxn/walk v0.0.0-20210112085537-c389da54e794 // indirect
-	github.com/lxn/win v0.0.0-20210218163916-a377121e959e // indirect
 	github.com/mattn/go-runewidth v0.0.27 // indirect
 	github.com/mdlayher/genetlink v1.3.2 // indirect
 	github.com/mdlayher/netlink v1.7.3-0.20250113171957-fbb4dce95f42 // indirect
@@ -118,13 +118,10 @@ require (
 	golang.org/x/exp/typeparams v0.0.0-20240314144324-c7f7c6466f7f // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
-	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/term v0.46.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
-	golang.zx2c4.com/wireguard/windows v0.5.3 // indirect
-	gopkg.in/Knetic/govaluate.v3 v3.0.0 // indirect
 	honnef.co/go/tools v0.7.0 // indirect
 )
