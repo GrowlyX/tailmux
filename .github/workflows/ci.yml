@@ -209,11 +209,8 @@ jobs:
         env:
           TAILMUX_API: http://127.0.0.1:21056
         run: |
-          xvfb-run -a -s "-screen 0 1280x800x24" sh -c '
-            desktop/src-tauri/target/release/tailmux-desktop --page overview &
-            sleep 12
-            import -window root shots/native-linux.png
-            kill %1'
+          xvfb-run -a -s "-screen 0 1280x800x24" dbus-run-session -- \
+            scripts/ci-app-screenshot-linux.sh desktop/src-tauri/target/release/tailmux-desktop shots/native-linux.png
       - name: screenshot of the real app (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
