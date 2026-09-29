@@ -7,23 +7,12 @@ struct MainWindow: View {
     @ObservedObject var manager: Manager
 
     var body: some View {
-        NavigationSplitView {
-            List(selection: Binding(get: { manager.page }, set: { if let p = $0 { manager.page = p } })) {
-                ForEach(Page.allCases) { page in
-                    Label(page.title, systemImage: page.icon).tag(page)
-                }
-            }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-            .safeAreaInset(edge: .top) {
-                HStack(spacing: 8) {
-                    Image(nsImage: DotsIcon.image(lit: store.runningCount, reachable: store.offline == nil, size: 20))
-                        .renderingMode(.template)
-                    Wordmark(size: 18)
-                    Spacer()
-                }
-                .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 6)
-            }
-        } detail: {
+        // A hand-built sidebar instead of NavigationSplitView: that one
+        // always draws a divider and tints the icons.
+        HStack(spacing: 0) {
+            Sidebar(store: store, manager: manager)
+                .frame(width: 210)
+                .background(SidebarMaterial().ignoresSafeArea())
             VStack(spacing: 0) {
                 if let offline = store.offline {
                     OfflineView(message: offline).padding(20)
@@ -39,9 +28,74 @@ struct MainWindow: View {
                 }
                 StatusLine(manager: manager)
             }
-            .frame(minWidth: 560)
+            .frame(minWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(nsColor: .windowBackgroundColor))
         }
+        .ignoresSafeArea(.container, edges: .top)
     }
+}
+
+struct Sidebar: View {
+    @ObservedObject var store: Store
+    @ObservedObject var manager: Manager
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 9) {
+                Image(nsImage: DotsIcon.image(lit: store.runningCount, reachable: store.offline == nil, size: 22))
+                    .renderingMode(.template)
+                    .foregroundStyle(.primary)
+                Wordmark(size: 20)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 48) // clear of the traffic-light buttons
+            .padding(.bottom, 18)
+            ForEach(Page.allCases) { page in
+                SidebarItem(page: page, selected: manager.page == page) { manager.page = page }
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 10)
+    }
+}
+
+struct SidebarItem: View {
+    var page: Page
+    var selected: Bool
+    var action: () -> Void
+    @StateObject private var hover = Flag()
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: page.icon)
+                .font(.system(size: 14))
+                .frame(width: 20)
+            Text(page.title).font(.system(size: 14, weight: selected ? .semibold : .regular))
+            Spacer()
+        }
+        .foregroundStyle(.primary) // icons the same color as the labels
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 7)
+                .fill(Color.primary.opacity(selected ? 0.12 : (hover.on ? 0.05 : 0)))
+        )
+        .contentShape(Rectangle())
+        .onHover { hover.on = $0 }
+        .onTapGesture(perform: action)
+    }
+}
+
+/// The translucent sidebar background macOS uses.
+struct SidebarMaterial: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let v = NSVisualEffectView()
+        v.material = .sidebar
+        v.blendingMode = .behindWindow
+        v.state = .followsWindowActiveState
+        return v
+    }
+
+    func updateNSView(_ v: NSVisualEffectView, context: Context) {}
 }
 
 struct StatusLine: View {
