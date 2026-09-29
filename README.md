@@ -21,11 +21,12 @@ and subnets from every tailnet work side by side, even when two tailnets use the
 
 ## Docs
 
-- [Install](docs/install.md): Homebrew, service modes, without Homebrew
+- [Install](docs/install.md): macOS (Homebrew), Windows and Linux (desktop app), service modes
 - [Setup and config](docs/setup.md): the `tailmux setup` TUI and every config key
 - [Routing](docs/routing.md): how tailmux picks a tailnet, and what happens on conflicts
 - [TUN mode](docs/tun.md): proxy-free, for every app
 - [Proxy mode](docs/proxy.md): SOCKS5, HTTP, PAC, ssh, kubectl
-- [Menu bar app](docs/menubar.md): switches, throughput, local API
+- [Menu bar app](docs/menubar.md): macOS panel and window, local API
+- [Desktop app](docs/desktop.md): the same for Windows and Linux
 - [Updates](docs/updates.md): automatic, and how to turn that off
 - [Development](docs/development.md): the in-process test lab, CI, releases

@@ -138,6 +138,108 @@ jobs:
           if [ "$RUNNER_OS" = Windows ]; then out/tailmux.exe service uninstall; else sudo out/tailmux service uninstall; fi
           if curl -sf --max-time 3 http://127.0.0.1:1056/status; then echo "still running after uninstall"; exit 1; fi
 
+  # The Windows/Linux desktop app: real installers, its API tests and
+  # screenshots against a live daemon, and a screenshot of the real app.
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      APPIMAGE_EXTRACT_AND_RUN: 1 # no FUSE on the runners
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - name: Linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libxdo-dev build-essential xvfb imagemagick
+      - name: service binary as the sidecar
+        run: |
+          triple=$(rustc -vV | sed -n 's/^host: //p')
+          ext=""
+          if [ "$RUNNER_OS" = Windows ]; then ext=.exe; scripts/fetch-wintun.sh desktop/src-tauri/binaries; fi
+          go build -ldflags "-X main.version=0.0.0-ci" -o "desktop/src-tauri/binaries/tailmux-$triple$ext" ./cmd/tailmux
+          cp "desktop/src-tauri/binaries/tailmux-$triple$ext" "tailmux$ext"
+      - name: check and bundle
+        working-directory: desktop
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm check
+          if [ "$RUNNER_OS" = Windows ]; then pnpm tauri build --bundles nsis,msi; else pnpm tauri build --bundles deb,appimage; fi
+      - name: start lab tailnets and daemon
+        run: |
+          TAILMUX_LAB="$PWD/lab.json" go test ./internal/mux -run TestLab -timeout 0 > lab.log 2>&1 &
+          for _ in $(seq 1 120); do [ -f lab.json.ready ] && break; sleep 2; done
+          ./tailmux up -config lab.json > up.log 2>&1 &
+          for _ in $(seq 1 60); do curl -sf http://127.0.0.1:21056/status && break; sleep 1; done
+          for n in alpha bravo charlie; do curl -sf --socks5-hostname 127.0.0.1:21055 "http://web.$n/?bytes=3000000" > /dev/null; done
+      - name: app API tests against the daemon
+        working-directory: desktop/src-tauri
+        env:
+          TAILMUX_API: http://127.0.0.1:21056
+        run: cargo test --release --test api
+      - name: screenshots of every view
+        working-directory: desktop
+        env:
+          TAILMUX_API: http://127.0.0.1:21056
+        run: |
+          pnpm exec playwright install --with-deps chromium
+          pnpm screenshot --out ../shots
+      - name: screenshot of the real app (Linux)
+        if: runner.os == 'Linux'
+        env:
+          TAILMUX_API: http://127.0.0.1:21056
+        run: |
+          xvfb-run -a -s "-screen 0 1280x800x24" sh -c '
+            desktop/src-tauri/target/release/tailmux-desktop --page overview &
+            sleep 12
+            import -window root shots/native-linux.png
+            kill %1'
+      - name: screenshot of the real app (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TAILMUX_API: http://127.0.0.1:21056
+        run: |
+          Start-Process desktop/src-tauri/target/release/tailmux-desktop.exe -ArgumentList '--page','overview'
+          Start-Sleep 12
+          Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $img = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          [System.Drawing.Graphics]::FromImage($img).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $img.Save("$PWD/shots/native-windows.png")
+          Stop-Process -Name tailmux-desktop -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: desktop-${{ runner.os }}
+          path: |
+            shots/
+            *.log
+            desktop/src-tauri/target/release/bundle/deb/*.deb
+            desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+            desktop/src-tauri/target/release/bundle/nsis/*.exe
+            desktop/src-tauri/target/release/bundle/msi/*.msi
+
   # The menu bar app, built and rendered against a live daemon.
   menubar:
     runs-on: macos-latest

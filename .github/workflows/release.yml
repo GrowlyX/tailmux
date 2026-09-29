@@ -47,6 +47,59 @@ jobs:
           ditto -c -k --keepParent dist/TailmuxBar.app "TailmuxBar_${GITHUB_REF_NAME#v}_macos.zip"
           gh release upload "$GITHUB_REF_NAME" "TailmuxBar_${GITHUB_REF_NAME#v}_macos.zip" --clobber
 
+  # The Windows and Linux desktop app, with the service bundled inside
+  # (and wintun.dll on Windows), attached to the release.
+  desktop:
+    needs: binaries
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      APPIMAGE_EXTRACT_AND_RUN: 1
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - name: Linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libxdo-dev build-essential
+      - name: service binary as the sidecar
+        run: |
+          triple=$(rustc -vV | sed -n 's/^host: //p')
+          ext=""
+          if [ "$RUNNER_OS" = Windows ]; then ext=.exe; scripts/fetch-wintun.sh desktop/src-tauri/binaries; fi
+          go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME#v}" -o "desktop/src-tauri/binaries/tailmux-$triple$ext" ./cmd/tailmux
+      - name: bundle
+        working-directory: desktop
+        run: |
+          pnpm install --frozen-lockfile
+          version="${GITHUB_REF_NAME#v}"
+          if [ "$RUNNER_OS" = Windows ]; then bundles=nsis,msi; else bundles=deb,appimage; fi
+          pnpm tauri build --bundles "$bundles" --config "{\"version\":\"$version\"}"
+      - name: attach to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          files=(desktop/src-tauri/target/release/bundle/{deb/*.deb,appimage/*.AppImage,nsis/*.exe,msi/*.msi})
+          ls -la "${files[@]}"
+          gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+
   # Publishes the formula to GrowlyX/homebrew-tap. The tap is written with
   # a deploy key (secret TAP_DEPLOY_KEY) scoped to that one repository.
   homebrew:

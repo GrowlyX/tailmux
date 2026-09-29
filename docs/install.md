@@ -25,7 +25,27 @@ whichever user runs the service.
 
 Logs go to `$(brew --prefix)/var/log/tailmux.log`.
 
-## Without Homebrew
+## Windows
+
+Download `tailmux_<version>_x64-setup.exe` (or the `.msi`) from
+[Releases](https://github.com/GrowlyX/tailmux/releases/latest) and run it.
+That installs the [desktop app](desktop.md) with the tailmux service inside.
+Open it and press **Install service…**; Windows asks for Administrator once.
+The service runs TUN mode, so every app can reach your tailnets. Its config
+lives at `%ProgramData%\tailmux\config.json`.
+
+## Linux
+
+Install the `.deb` (Debian, Ubuntu) or run the `.AppImage` from
+[Releases](https://github.com/GrowlyX/tailmux/releases/latest), then press
+**Install service…** in the app. You can also do it from a terminal:
+
+```sh
+sudo tailmux service install     # systemd unit, TUN mode, config in /etc/tailmux
+tailmux service status
+```
+
+## Without an installer
 
 ```sh
 go install github.com/GrowlyX/tailmux/cmd/tailmux@latest
