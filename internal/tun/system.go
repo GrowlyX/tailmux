@@ -109,7 +109,14 @@ func (s *System) DNSActive() bool {
 func (s *System) reconcile() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	prefixes, domains := s.m.Router().Claims()
+	r := s.m.Router()
+	prefixes, domains := r.Claims()
+	// Devices' own addresses: a name in public DNS pointing at a tailnet
+	// device (grafana.example.com -> 100.x) has to land here too. A /32
+	// beats the official client's 100.64.0.0/10, so both can coexist.
+	if s.cfg.TUN.PeerRoutes == nil || *s.cfg.TUN.PeerRoutes {
+		prefixes = append(prefixes, r.PeerAddrs()...)
+	}
 	if s.cfg.TUN.CGNAT {
 		prefixes = append(prefixes, netip.MustParsePrefix("100.64.0.0/10"), netip.MustParsePrefix("fd7a:115c:a1e0::/48"))
 	}

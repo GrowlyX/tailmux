@@ -50,6 +50,10 @@ type TUNConfig struct {
 	MTU     int    `json:"mtu,omitempty"`        // default 1500
 	Range   string `json:"fake_range,omitempty"` // fake IPs handed out for tailnet names; default 198.18.0.0/15
 	CGNAT   bool   `json:"cgnat,omitempty"`      // also route 100.64.0.0/10; off by default so the official client keeps it
+	// PeerRoutes routes each tailnet device's own address (a /32) into the
+	// TUN, so names that resolve to one through ordinary DNS work too.
+	// Default true.
+	PeerRoutes *bool `json:"peer_routes,omitempty"`
 	// NoDNS leaves the OS resolver alone; names then only work through
 	// the proxies.
 	NoDNS bool `json:"no_dns,omitempty"`

@@ -342,3 +342,23 @@ func (r *Router) Claims() (prefixes []netip.Prefix, domains []string) {
 	slices.Sort(domains)
 	return slices.Compact(prefixes), slices.Compact(domains)
 }
+
+// PeerAddrs lists the IPv4 address of every device in every running
+// tailnet, as /32s.
+func (r *Router) PeerAddrs() []netip.Prefix {
+	var out []netip.Prefix
+	for _, n := range r.nets {
+		if !n.Running {
+			continue
+		}
+		for _, p := range n.Peers {
+			for _, ip := range p.IPs {
+				if ip.Is4() {
+					out = append(out, netip.PrefixFrom(ip, 32))
+				}
+			}
+		}
+	}
+	slices.SortFunc(out, func(a, b netip.Prefix) int { return a.Compare(b) })
+	return slices.Compact(out)
+}

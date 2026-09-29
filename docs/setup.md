@@ -60,7 +60,8 @@ Consider turning off key expiry for it in the admin console.
 | `direct` | `true` | Proxy traffic no tailnet claims goes out normally |
 | `state_dir` | see [install](install.md) | Logins and fake-IP table |
 | `tun.enabled` | `false` | [TUN mode](tun.md) |
-| `tun.cgnat` | `false` | Also route `100.64.0.0/10` in TUN mode |
+| `tun.peer_routes` | `true` | Route each tailnet device's address, for DNS names that point at one |
+| `tun.cgnat` | `false` | Route all of `100.64.0.0/10` in TUN mode |
 | `tun.fake_range` | `198.18.0.0/15` | Where fake IPs come from |
 | `tun.name` / `tun.mtu` / `tun.no_dns` | auto / 1500 / false | |
 | `updates.check` | `true` | Check GitHub for releases ([updates](updates.md)) |

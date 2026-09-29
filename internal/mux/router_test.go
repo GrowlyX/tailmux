@@ -143,3 +143,16 @@ func TestUsefulSplitDomain(t *testing.T) {
 		}
 	}
 }
+
+func TestPeerAddrs(t *testing.T) {
+	got := testRouter(Pins{}).PeerAddrs()
+	var s []string
+	for _, p := range got {
+		s = append(s, p.String())
+	}
+	// 100.64.0.1 is in two tailnets but routed once.
+	want := []string{"100.64.0.1/32", "100.64.0.2/32", "100.64.0.9/32", "100.70.0.3/32"}
+	if !slices.Equal(s, want) {
+		t.Errorf("got %v, want %v", s, want)
+	}
+}

@@ -11,6 +11,9 @@ tailmux then:
   tailnet names, the MagicDNS suffixes and the split-DNS domains, using
   `/etc/resolver/<domain>` on macOS and systemd-resolved routing domains on
   Linux;
+- routes every tailnet device's own address (one /32 each) into the TUN, so a
+  name in ordinary DNS that points at a device (`grafana.example.com →
+  100.101.102.103`) works too;
 - answers those names with a **fake IP** from `198.18.0.0/15`, unique per name.
   That keeps `web.work` and `web.home` apart even when both are really
   100.64.0.1.
@@ -24,8 +27,9 @@ through the owning tailnet. So `ssh db.home`, `psql -h db.corp.internal` and
 
 - **Your LAN stays yours.** A subnet that overlaps a local network is skipped
   (the log says so). Pin it to force it.
-- **The official Tailscale app can coexist.** tailmux leaves `100.64.0.0/10`
-  alone unless you set `"cgnat": true`. Reach devices by name instead.
+- **The official Tailscale app can coexist.** tailmux routes only the
+  addresses of devices in its own tailnets, not all of `100.64.0.0/10`
+  (unless you set `"cgnat": true`). Turn that off with `"peer_routes": false`.
 - **No loops.** Traffic that arrives on the TUN is never dialed "directly".
   If no tailnet claims it, the connection is refused.
 - **Clean exit.** Routes go away with the interface. Resolver files carry a

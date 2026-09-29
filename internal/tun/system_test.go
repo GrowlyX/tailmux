@@ -124,6 +124,13 @@ func TestSystem(t *testing.T) {
 		}
 	})
 
+	t.Run("device IPs over the kernel", func(t *testing.T) {
+		// What public DNS pointing at a tailnet device looks like: the
+		// app connects to the real 100.x address. 100.64.0.1 is web in
+		// alpha and bravo; alpha wins on priority.
+		expect(t, "http://100.64.0.1/", "alpha web", func() (string, error) { return get("http://100.64.0.1/") })
+	})
+
 	t.Run("UDP over the kernel", func(t *testing.T) {
 		rip := fakeFor("resolver.charlie.")
 		lab.Eventually(t, "udp to in-tailnet resolver", 20*time.Second, func() error {
