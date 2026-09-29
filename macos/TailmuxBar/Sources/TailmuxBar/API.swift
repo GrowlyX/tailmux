@@ -56,6 +56,38 @@ struct TailnetStats: Decodable {
     var tx: [Double]?
 }
 
+struct PeerInfo: Decodable, Identifiable, Hashable {
+    var id: String { tailnet + "/" + name }
+    var tailnet: String
+    var name: String
+    var alias: String
+    var fqdn: String
+    var ips: [String]?
+    var online: Bool
+    var routes: [String]?
+}
+
+struct ConfigView: Decodable {
+    var path: String
+    var stateDir: String
+    var config: SavedConfig
+}
+
+struct SavedConfig: Decodable {
+    var hostname: String?
+    var tailnets: [SavedTailnet]?
+    var tun: SavedTUN?
+    var updates: SavedUpdates?
+}
+
+struct SavedTailnet: Decodable {
+    var name: String
+    var controlUrl: String?
+}
+
+struct SavedTUN: Decodable { var enabled: Bool? }
+struct SavedUpdates: Decodable { var check: Bool?; var auto: Bool? }
+
 /// Talks to the daemon's HTTP API on loopback.
 struct API {
     var base: URL
@@ -101,6 +133,33 @@ struct API {
         let (data, resp) = try await API.session.data(from: base.appendingPathComponent(path))
         try check(resp, data)
         return try API.decoder.decode(T.self, from: data)
+    }
+
+    func getLogs(_ n: Int) async throws -> [String] {
+        var c = URLComponents(url: base.appendingPathComponent("logs"), resolvingAgainstBaseURL: false)!
+        c.queryItems = [URLQueryItem(name: "n", value: String(n))]
+        let (data, resp) = try await API.session.data(from: c.url!)
+        try check(resp, data)
+        return try API.decoder.decode([String].self, from: data)
+    }
+
+    /// Sends a changing request (always with X-Tailmux) and returns the body.
+    @discardableResult
+    func send(_ method: String, _ path: String, json: [String: Any]? = nil) async throws -> Data {
+        var req = URLRequest(url: base.appendingPathComponent(path))
+        req.httpMethod = method
+        req.setValue("1", forHTTPHeaderField: "X-Tailmux")
+        if let json {
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = try JSONSerialization.data(withJSONObject: json)
+        }
+        let (data, resp) = try await API.session.data(for: req)
+        try check(resp, data)
+        return data
+    }
+
+    func decode<T: Decodable>(_ data: Data, as: T.Type) throws -> T {
+        try API.decoder.decode(T.self, from: data)
     }
 
     func setEnabled(_ name: String, _ on: Bool) async throws {

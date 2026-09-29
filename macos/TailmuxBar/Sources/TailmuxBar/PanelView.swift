@@ -26,7 +26,7 @@ struct PanelView: View {
                 }
             }
             Divider().opacity(0.5)
-            FooterView(snapshot: snapshot)
+            FooterView(store: store, snapshot: snapshot)
         }
         .padding(14)
         .frame(width: 372)
@@ -70,6 +70,7 @@ struct CompactLabel: LabelStyle {
 
 struct ThroughputChart: View {
     @ObservedObject var store: Store
+    var height: CGFloat = 96
 
     struct Point: Identifiable {
         var id: String { "\(name)-\(t)" }
@@ -115,7 +116,7 @@ struct ThroughputChart: View {
                     }
                 }
             }
-            .frame(height: 96)
+            .frame(height: height)
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.04)))
@@ -276,6 +277,7 @@ struct OfflineView: View {
 }
 
 struct FooterView: View {
+    @ObservedObject var store: Store
     var snapshot: Bool
     @StateObject private var loginItem = Flag(SMAppService.mainApp.status == .enabled)
 
@@ -287,6 +289,12 @@ struct FooterView: View {
                 Text("Open at login").font(.system(size: 12))
             }
             Spacer()
+            Text("Open tailmux")
+                .font(.system(size: 11, weight: .semibold))
+                .padding(.horizontal, 12).padding(.vertical, 4)
+                .background(Capsule().fill(Color.primary.opacity(0.1)))
+                .contentShape(Capsule())
+                .onTapGesture { if !snapshot { MainWindowController.shared.show(store: store) } }
             Text("Quit")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.white)

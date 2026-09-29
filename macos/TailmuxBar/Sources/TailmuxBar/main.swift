@@ -15,45 +15,61 @@ struct TailmuxBarApp: App {
     }
 }
 
-// `TailmuxBar --snapshot out.png` renders the panel against the running
-// daemon and exits: used for screenshots and to check the UI in CI
-// without a menu bar.
+// Snapshot mode, for screenshots and for checking the UI in CI without a
+// menu bar:
+//   TailmuxBar --snapshot out.png [--dark] [--wait 1]            the menu bar panel
+//   TailmuxBar --snapshot out.png --page settings [--dark]       a page of the main window
+// Views are rendered in a real offscreen window, so native controls
+// (text fields, toggles, lists) draw as they do on screen.
 let args = CommandLine.arguments
-if let i = args.firstIndex(of: "--snapshot"), i + 1 < args.count {
-    let out = URL(fileURLWithPath: args[i + 1])
+
+func arg(_ name: String) -> String? {
+    args.firstIndex(of: name).flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+}
+
+@MainActor
+func renderWindow<V: View>(_ view: V, size: NSSize, dark: Bool) -> Data? {
+    let w = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+    w.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+    let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height))
+    host.frame = NSRect(origin: .zero, size: size)
+    w.contentView = host
+    w.orderFront(nil)
+    host.layoutSubtreeIfNeeded()
+    RunLoop.current.run(until: Date().addingTimeInterval(0.8)) // let lists and charts lay out
+    guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return nil }
+    host.cacheDisplay(in: host.bounds, to: rep)
+    w.orderOut(nil)
+    return rep.representation(using: .png, properties: [:])
+}
+
+if let outPath = arg("--snapshot") {
+    let out = URL(fileURLWithPath: outPath)
     let dark = args.contains("--dark")
-    let wait = args.firstIndex(of: "--wait").flatMap { Double(args[$0 + 1]) } ?? 1
-    NSApplication.shared.setActivationPolicy(.prohibited)
+    let wait = arg("--wait").flatMap(Double.init) ?? 1
+    NSApplication.shared.setActivationPolicy(.accessory)
     _ = Task { @MainActor in
         let store = Store()
         store.start()
         try? await Task.sleep(nanoseconds: UInt64(wait * 1e9))
         await store.refresh()
-        let view = PanelView(store: store, snapshot: true)
-            .background(Color(nsColor: .windowBackgroundColor))
-            .environment(\.colorScheme, dark ? .dark : .light)
-        let r = ImageRenderer(content: view)
-        r.scale = 2
-        let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
         var png: Data?
-        appearance.performAsCurrentDrawingAppearance {
-            if let cg = r.cgImage {
-                png = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])
-            }
+        if let pageName = arg("--page"), let page = Page(rawValue: pageName) {
+            let m = Manager(store: store)
+            m.page = page
+            await m.load(resetForm: true)
+            png = renderWindow(MainWindow(store: store, manager: m).background(Color(nsColor: .windowBackgroundColor)),
+                               size: NSSize(width: 980, height: 640), dark: dark)
+        } else {
+            let panel = PanelView(store: store, snapshot: true).background(Color(nsColor: .windowBackgroundColor))
+            let size = NSHostingView(rootView: panel).fittingSize
+            png = renderWindow(panel, size: size, dark: dark)
         }
         guard let png else {
             FileHandle.standardError.write("render failed\n".data(using: .utf8)!)
             exit(1)
         }
         try png.write(to: out)
-        // The menu bar icon too, at a few fill levels.
-        for n in [0, 3, 5] {
-            let img = DotsIcon.image(lit: n, reachable: true, size: 64)
-            if let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
-               let data = rep.representation(using: .png, properties: [:]) {
-                try data.write(to: out.deletingPathExtension().appendingPathExtension("icon\(n).png"))
-            }
-        }
         print("wrote \(out.path) (\(store.tailnets.count) tailnets, offline: \(store.offline ?? "no"))")
         exit(0)
     }

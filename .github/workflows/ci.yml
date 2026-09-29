@@ -101,12 +101,16 @@ jobs:
           echo "$out"
           echo "$out" | grep -q "3 tailnets, offline: no"
           TAILMUX_API=http://127.0.0.1:21056 dist/TailmuxBar.app/Contents/MacOS/TailmuxBar --snapshot panel-dark.png --dark
+          for page in overview tailnets devices settings logs; do
+            TAILMUX_API=http://127.0.0.1:21056 dist/TailmuxBar.app/Contents/MacOS/TailmuxBar --snapshot "window-$page.png" --page "$page" --dark
+          done
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: menubar-snapshots
           path: |
             panel*.png
+            window-*.png
             *.log
 
   # Installs the formula from a tarball of this commit, runs `brew test`
