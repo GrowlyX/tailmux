@@ -18,6 +18,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -100,7 +101,7 @@ func main() {
 		if *tunFlag {
 			cfg.TUN.Enabled = true
 		}
-		err = up(cfg, *verbose)
+		err = up(cfg, *cfgPath, *verbose)
 	case "status":
 		err = status(cfg)
 	case "repair":
@@ -166,14 +167,16 @@ func configPath() string {
 	return filepath.Join(home, ".config", "tailmux", "config.json")
 }
 
-func up(cfg *mux.Config, verbose bool) error {
+func up(cfg *mux.Config, cfgPath string, verbose bool) error {
 	if cfg.TUN.Enabled && os.Geteuid() != 0 {
 		return fmt.Errorf("tun mode needs root: sudo tailmux up -tun (or `sudo brew services start tailmux`)")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	log.SetOutput(io.MultiWriter(os.Stderr, mux.Logs))
 	m := mux.New(cfg, mux.Options{Verbose: verbose})
+	m.ConfigPath = cfgPath
 	defer m.Close()
 
 	socksLn, err := net.Listen("tcp", cfg.SOCKS5)
@@ -239,14 +242,17 @@ func up(cfg *mux.Config, verbose bool) error {
 		}
 		go um.Run(ctx)
 	}
-	go update.WatchExecutable(ctx, invoked, 15*time.Second, func() { close(restart) })
+	var restartOnce sync.Once
+	doRestart := func() { restartOnce.Do(func() { close(restart) }) }
+	m.Restart = doRestart
+	go update.WatchExecutable(ctx, invoked, 15*time.Second, doRestart)
 
 	select {
 	case <-ctx.Done():
 		log.Printf("shutting down")
 		return nil
 	case <-restart:
-		log.Printf("new tailmux binary installed; restarting")
+		log.Printf("restarting")
 		return errRestart{invoked}
 	}
 }

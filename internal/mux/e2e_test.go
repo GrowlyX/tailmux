@@ -5,11 +5,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -22,12 +25,14 @@ import (
 )
 
 func TestEndToEnd(t *testing.T) {
+	log.SetOutput(io.MultiWriter(os.Stderr, Logs))
+	defer log.SetOutput(os.Stderr)
 	if testing.Short() {
 		t.Skip("spins up three tailnets")
 	}
 	netns.SetEnabled(false)
 	t.Cleanup(func() { netns.SetEnabled(true) })
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
 
 	alpha, bravo, charlie, webIPs := lab.Start(t, ctx)
@@ -49,6 +54,9 @@ func TestEndToEnd(t *testing.T) {
 	}
 	m := New(cfg, Options{MemStore: true})
 	t.Cleanup(func() { m.Close() })
+	// The config as a user would have written it, for the management API.
+	m.ConfigPath = filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(m.ConfigPath, []byte(fmt.Sprintf(`{"tailnets":[{"name":"alpha","control_url":%q},{"name":"bravo","control_url":%q},{"name":"charlie","control_url":%q}]}`, alpha.URL, bravo.URL, charlie.URL)), 0o600)
 	if err := m.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -277,6 +285,93 @@ func TestEndToEnd(t *testing.T) {
 			}
 			return nil
 		})
+	})
+
+	t.Run("manage tailnets and settings over the API", func(t *testing.T) {
+		base := "http://" + httpLn.Addr().String()
+		call := func(method, path, body string, header bool) (int, string) {
+			req, _ := http.NewRequest(method, base+path, strings.NewReader(body))
+			if header {
+				req.Header.Set("X-Tailmux", "1")
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			b, _ := io.ReadAll(resp.Body)
+			return resp.StatusCode, string(b)
+		}
+		names := func() []string {
+			c, _ := ReadConfig(m.ConfigPath)
+			var n []string
+			for _, tn := range c.Tailnets {
+				n = append(n, tn.Name)
+			}
+			return n
+		}
+
+		// A fourth tailnet, joined while running.
+		// Its own budget: under -race the shared test context is mostly
+		// spent by the time this runs.
+		dctx, dcancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer dcancel()
+		delta := lab.NewTailnet(t, "delta")
+		delta.WebNode(t, dctx)
+		body := fmt.Sprintf(`{"name":"delta","control_url":%q,"ephemeral":true}`, delta.URL)
+		if code, _ := call("POST", "/tailnets", body, false); code != 403 {
+			t.Fatalf("add without header: %d", code)
+		}
+		if code, out := call("POST", "/tailnets", body, true); code != 201 {
+			t.Fatalf("add: %d %s", code, out)
+		}
+		if code, _ := call("POST", "/tailnets", body, true); code != 400 {
+			t.Errorf("duplicate add: %d", code)
+		}
+		if code, _ := call("POST", "/tailnets", `{"name":"no dots.here"}`, true); code != 400 {
+			t.Errorf("bad name: %d", code)
+		}
+		if got := names(); !slices.Equal(got, []string{"alpha", "bravo", "charlie", "delta"}) {
+			t.Fatalf("config after add: %v", got)
+		}
+		lab.Eventually(t, "web.delta reachable", 60*time.Second, func() error {
+			got, err := getVia(socksHTTP, "http://web.delta/")
+			if err != nil {
+				return err
+			}
+			if got != "delta web" {
+				return fmt.Errorf("got %q", got)
+			}
+			return nil
+		})
+
+		if code, _ := call("DELETE", "/tailnets/delta", "", true); code != 204 {
+			t.Fatalf("remove: %d", code)
+		}
+		if code, _ := call("DELETE", "/tailnets/delta", "", true); code != 404 {
+			t.Errorf("remove twice: %d", code)
+		}
+		if got := names(); !slices.Equal(got, []string{"alpha", "bravo", "charlie"}) {
+			t.Fatalf("config after remove: %v", got)
+		}
+		if d := m.Router().RouteName("web.delta"); d.OK() {
+			t.Errorf("removed tailnet still routes: %+v", d)
+		}
+
+		if code, out := call("PUT", "/settings", `{"tun":true,"auto_update":false,"hostname":"laptop"}`, true); code != 200 || !strings.Contains(out, "restart_required") {
+			t.Fatalf("settings: %d %s", code, out)
+		}
+		c, _ := ReadConfig(m.ConfigPath)
+		if !c.TUN.Enabled || c.Updates.AutoEnabled() || c.Hostname != "laptop" {
+			t.Errorf("settings not saved: %+v", c)
+		}
+		if code, out := call("GET", "/config", "", false); code != 200 || !strings.Contains(out, `"laptop"`) {
+			t.Errorf("config view: %d %s", code, out)
+		}
+		log.Printf("hello from the log ring")
+		if code, out := call("GET", "/logs?n=50", "", false); code != 200 || !strings.Contains(out, "hello from the log ring") {
+			t.Errorf("logs: %d %.200s", code, out)
+		}
 	})
 
 	t.Run("status, conflicts and PAC", func(t *testing.T) {

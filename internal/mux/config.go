@@ -175,9 +175,14 @@ func (c *Config) Save(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
+	uid, gid, owned := fileOwner(path)
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
 		return err
+	}
+	if owned {
+		// The root daemon saving a user's config must not take it over.
+		os.Chown(tmp, uid, gid)
 	}
 	return os.Rename(tmp, path)
 }

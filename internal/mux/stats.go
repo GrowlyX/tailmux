@@ -89,7 +89,7 @@ func (m *Mux) sampleTraffic(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			for _, t := range m.tailnets {
+			for _, t := range m.list() {
 				t.traffic.sample()
 			}
 		}
@@ -114,7 +114,7 @@ type Stats struct {
 
 func (m *Mux) Stats() Stats {
 	s := Stats{IntervalMS: 1000}
-	for _, t := range m.tailnets {
+	for _, t := range m.list() {
 		rx, tx := t.traffic.history()
 		st := t.Status()
 		s.Tailnets = append(s.Tailnets, TailnetStats{
@@ -146,7 +146,7 @@ func (m *Mux) loadDisabled() map[string]bool {
 
 func (m *Mux) saveDisabled() error {
 	var names []string
-	for _, t := range m.tailnets {
+	for _, t := range m.list() {
 		if !t.Enabled() {
 			names = append(names, t.cfg.Name)
 		}
@@ -159,7 +159,7 @@ func (m *Mux) saveDisabled() error {
 // SetEnabled takes a tailnet down (like `tailscale down`) or back up.
 // A disabled tailnet keeps its login but routes nothing.
 func (m *Mux) SetEnabled(ctx context.Context, name string, on bool) error {
-	t := m.byName[name]
+	t := m.get(name)
 	if t == nil {
 		return os.ErrNotExist
 	}
@@ -197,7 +197,7 @@ func (m *Mux) serveToggle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), code)
 		return
 	}
-	writeJSON(w, m.byName[r.PathValue("name")].Status())
+	writeJSON(w, m.get(r.PathValue("name")).Status())
 }
 
 // PeerInfo is one device in one tailnet, for `tailmux peers`.

@@ -21,10 +21,19 @@ var Version = "dev"
 // to the tailnet that owns its destination.
 type Mux struct {
 	cfg      *Config
+	opts     Options
+	tmu      sync.RWMutex // guards tailnets, byName, ctx
 	tailnets []*Tailnet
 	byName   map[string]*Tailnet
+	ctx      context.Context // set by Start; tailnets added later start with it
 	router   atomic.Pointer[Router]
-	direct   net.Dialer
+
+	// ConfigPath, if set, is where tailnet and settings changes made
+	// through the API are saved.
+	ConfigPath string
+	// Restart, if set, restarts the daemon (to apply settings).
+	Restart func()
+	direct  net.Dialer
 
 	cacheMu sync.Mutex
 	cache   map[string]cacheEntry
@@ -54,7 +63,7 @@ type Options struct {
 }
 
 func New(cfg *Config, o Options) *Mux {
-	m := &Mux{cfg: cfg, byName: map[string]*Tailnet{}, cache: map[string]cacheEntry{}, verbose: o.Verbose}
+	m := &Mux{cfg: cfg, opts: o, byName: map[string]*Tailnet{}, cache: map[string]cacheEntry{}, verbose: o.Verbose}
 	m.direct.Timeout = 15 * time.Second
 	for i, tc := range cfg.Tailnets {
 		t := newTailnet(tc, i, tailnetOpts{stateDir: cfg.StateDir, verbose: o.Verbose, memStore: o.MemStore}, m.rebuild)
@@ -68,9 +77,13 @@ func New(cfg *Config, o Options) *Mux {
 // Start brings up every tailnet concurrently. Tailnets that need an
 // interactive login print a URL and keep going in the background.
 func (m *Mux) Start(ctx context.Context) error {
+	m.tmu.Lock()
+	m.ctx = ctx
+	m.tmu.Unlock()
+	list := m.list()
 	var wg sync.WaitGroup
-	errs := make([]error, len(m.tailnets))
-	for i, t := range m.tailnets {
+	errs := make([]error, len(list))
+	for i, t := range list {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -79,7 +92,7 @@ func (m *Mux) Start(ctx context.Context) error {
 	}
 	wg.Wait()
 	for name := range m.loadDisabled() {
-		if t := m.byName[name]; t != nil && t.lc != nil {
+		if t := m.get(name); t != nil && t.lc != nil {
 			if err := t.setEnabled(ctx, false); err != nil {
 				errs = append(errs, err)
 			}
@@ -91,15 +104,16 @@ func (m *Mux) Start(ctx context.Context) error {
 
 func (m *Mux) Close() error {
 	var errs []error
-	for _, t := range m.tailnets {
+	for _, t := range m.list() {
 		errs = append(errs, t.close())
 	}
 	return errors.Join(errs...)
 }
 
 func (m *Mux) rebuild() {
-	snaps := make([]Snapshot, 0, len(m.tailnets))
-	for _, t := range m.tailnets {
+	list := m.list()
+	snaps := make([]Snapshot, 0, len(list))
+	for _, t := range list {
 		snaps = append(snaps, t.Snapshot())
 	}
 	m.router.Store(NewRouter(snaps, m.cfg.pins()))
@@ -123,9 +137,21 @@ func (m *Mux) OnChange(f func()) {
 
 func (m *Mux) Router() *Router { return m.router.Load() }
 
-func (m *Mux) Tailnets() []*Tailnet { return m.tailnets }
+func (m *Mux) Tailnets() []*Tailnet { return m.list() }
 
-func (m *Mux) Tailnet(name string) *Tailnet { return m.byName[name] }
+func (m *Mux) Tailnet(name string) *Tailnet { return m.get(name) }
+
+func (m *Mux) list() []*Tailnet {
+	m.tmu.RLock()
+	defer m.tmu.RUnlock()
+	return slices.Clone(m.tailnets)
+}
+
+func (m *Mux) get(name string) *Tailnet {
+	m.tmu.RLock()
+	defer m.tmu.RUnlock()
+	return m.byName[name]
+}
 
 // Target is where a destination ended up: a tailnet (with the decision
 // that picked it) or the direct network.
@@ -163,7 +189,10 @@ func (m *Mux) Resolve(ctx context.Context, host string) (Target, error) {
 			tgt.IPs = []netip.Addr{ip}
 		}
 		if len(tgt.IPs) == 0 && d.Query != "" {
-			tn := m.byName[d.Tailnet]
+			tn := m.get(d.Tailnet)
+			if tn == nil {
+				return tgt, fmt.Errorf("tailnet %s was removed", d.Tailnet)
+			}
 			ips, err := m.resolveIn(ctx, tn, d.Query)
 			if err != nil {
 				return tgt, err
@@ -290,7 +319,11 @@ func (m *Mux) dial(ctx context.Context, network, addr string, allowDirect bool) 
 	}
 	dial := m.direct.DialContext
 	if tgt.Tailnet != "" {
-		dial = m.byName[tgt.Tailnet].Dial
+		tn := m.get(tgt.Tailnet)
+		if tn == nil {
+			return nil, tgt, fmt.Errorf("tailnet %s was removed", tgt.Tailnet)
+		}
+		dial = tn.Dial
 	} else if !allowDirect {
 		if !*m.cfg.Direct {
 			return nil, tgt, ErrDirectDisabled

@@ -26,6 +26,12 @@ func (m *Mux) HTTPHandler(socksAddr string) http.Handler {
 	api.HandleFunc("GET /peers", m.servePeers)
 	api.HandleFunc("POST /update", m.serveUpdate)
 	api.HandleFunc("POST /repair", m.serveRepair)
+	api.HandleFunc("GET /config", m.serveConfig)
+	api.HandleFunc("POST /tailnets", m.serveAddTailnet)
+	api.HandleFunc("DELETE /tailnets/{name}", m.serveRemoveTailnet)
+	api.HandleFunc("PUT /settings", m.serveSettings)
+	api.HandleFunc("POST /restart", m.serveRestart)
+	api.HandleFunc("GET /logs", m.serveLogs)
 	api.HandleFunc("POST /tailnets/{name}/{action}", m.serveToggle)
 	api.HandleFunc("GET /proxy.pac", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-ns-proxy-autoconfig")
@@ -103,7 +109,7 @@ type Conflict struct {
 
 func (m *Mux) Status() Status {
 	var s Status
-	for _, t := range m.tailnets {
+	for _, t := range m.list() {
 		s.Tailnets = append(s.Tailnets, t.Status())
 	}
 	s.Conflicts = m.Router().Conflicts()
