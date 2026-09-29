@@ -122,18 +122,17 @@ func (m *Manager) Install(ctx context.Context) error {
 		return ErrBusy
 	}
 	m.busy = true
-	rel := m.latest
 	m.mu.Unlock()
 	defer func() { m.mu.Lock(); m.busy = false; m.mu.Unlock() }()
 
-	if rel == nil {
-		if _, err := m.Check(ctx); err != nil {
-			return err
-		}
-		m.mu.Lock()
-		rel = m.latest
-		m.mu.Unlock()
+	// Always ask again: the last check can be hours old, and the Update
+	// button is pressed precisely because something new came out.
+	if _, err := m.Check(ctx); err != nil {
+		return err
 	}
+	m.mu.Lock()
+	rel := m.latest
+	m.mu.Unlock()
 	if !Newer(m.Current, rel.Version()) {
 		return nil
 	}

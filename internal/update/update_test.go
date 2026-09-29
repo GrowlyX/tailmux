@@ -173,3 +173,23 @@ func TestWatchExecutable(t *testing.T) {
 		t.Fatal("did not notice the new binary")
 	}
 }
+
+// A release published after the last check must still be installed when
+// an update is requested (the Update button right after a release).
+func TestInstallRechecks(t *testing.T) {
+	exe := filepath.Join(t.TempDir(), "tailmux")
+	os.WriteFile(exe, []byte("OLD"), 0o755)
+	fakeRelease(t, "0.1.0", []byte("SAME"), false)
+	m := NewManager("0.1.0", true)
+	m.Exe = exe
+	if st, _ := m.Check(context.Background()); st.Available {
+		t.Fatal("nothing newer yet")
+	}
+	fakeRelease(t, "0.1.1", []byte("NEW"), false) // released after that check
+	if err := m.Install(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(exe); string(b) != "NEW" {
+		t.Fatalf("stale check: exe = %q", b)
+	}
+}
