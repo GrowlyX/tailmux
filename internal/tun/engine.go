@@ -11,7 +11,10 @@ import (
 	"log"
 	"net"
 	"net/netip"
+	"os"
 	"strconv"
+	"sync"
+	"syscall"
 	"time"
 
 	wgtun "github.com/tailscale/wireguard-go/tun"
@@ -72,7 +75,9 @@ func NewEngine(m *mux.Mux, dev wgtun.Device, fake *FakeIPs, mtu int) (*Engine, e
 }
 
 // Run pumps packets between the device and the stack until ctx ends or
-// the device fails.
+// the device fails. Transient errors (see transient) don't count as
+// failing: closing the device would destroy the interface along with
+// every route through it.
 func (e *Engine) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -103,14 +108,27 @@ func (e *Engine) fromDevice() error {
 		bufs[i] = make([]byte, offset+65535)
 	}
 	sizes := make([]int, n)
+	var lim logLimiter
+	var backoff time.Duration
 	for {
 		count, err := e.dev.Read(bufs, sizes, offset)
 		if err != nil {
 			if errors.Is(err, wgtun.ErrTooManySegments) {
 				continue
 			}
-			return err
+			if !transient(err) {
+				return err
+			}
+			// wireguard-go on macOS also reports its route-socket
+			// listener's errors through Read, e.g. "route ip+net: no
+			// buffer space available" while the network churns. The
+			// device itself is fine; keep reading.
+			lim.printf("tun read: %v (ignored)", err)
+			backoff = min(max(2*backoff, 10*time.Millisecond), time.Second)
+			time.Sleep(backoff)
+			continue
 		}
+		backoff = 0
 		for i := range count {
 			pkt := bufs[i][offset : offset+sizes[i]]
 			if len(pkt) == 0 {
@@ -137,6 +155,7 @@ func (e *Engine) fromDevice() error {
 }
 
 func (e *Engine) toDevice(ctx context.Context) error {
+	var lim logLimiter
 	for {
 		pkt := e.ep.ReadContext(ctx)
 		if pkt == nil {
@@ -148,12 +167,47 @@ func (e *Engine) toDevice(ctx context.Context) error {
 		copy(buf[offset:], v.AsSlice())
 		v.Release()
 		if _, err := e.dev.Write([][]byte{buf}, offset); err != nil {
-			if errors.Is(err, net.ErrClosed) {
+			if errors.Is(err, net.ErrClosed) || errors.Is(err, os.ErrClosed) {
 				return err
 			}
-			log.Printf("tun write: %v", err)
+			// ENOBUFS and friends: the kernel queue is full. Drop the
+			// packet like a congested link would; TCP retransmits.
+			lim.printf("tun write: %v (packet dropped)", err)
 		}
 	}
+}
+
+// transient reports whether a device error is momentary resource
+// pressure rather than the device going away.
+func transient(err error) bool {
+	for _, e := range []syscall.Errno{syscall.ENOBUFS, syscall.ENOMEM, syscall.EAGAIN, syscall.EINTR} {
+		if errors.Is(err, e) {
+			return true
+		}
+	}
+	return false
+}
+
+// logLimiter keeps a burst of identical errors from flooding the log.
+type logLimiter struct {
+	mu         sync.Mutex
+	last       time.Time
+	suppressed int
+}
+
+func (l *logLimiter) printf(format string, args ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if time.Since(l.last) < 10*time.Second {
+		l.suppressed++
+		return
+	}
+	if l.suppressed > 0 {
+		format += " (and %d more since the last report)"
+		args = append(args, l.suppressed)
+	}
+	log.Printf(format, args...)
+	l.last, l.suppressed = time.Now(), 0
 }
 
 func addrOf(a tcpip.Address) netip.Addr {
