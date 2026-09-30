@@ -193,6 +193,32 @@ func TestSystem(t *testing.T) {
 		}
 	})
 
+	t.Run("recreates a destroyed device", func(t *testing.T) {
+		// What a fatal device error does: the engine closes the device,
+		// and on macOS the utun disappears with its routes.
+		old := sys.Interface()
+		sys.devMu.Lock()
+		dev := sys.dev
+		sys.devMu.Unlock()
+		dev.Close()
+		lab.Eventually(t, "new device", 30*time.Second, func() error {
+			sys.devMu.Lock()
+			cur, name := sys.dev, sys.ifname
+			sys.devMu.Unlock()
+			if cur == dev || cur == nil {
+				return fmt.Errorf("still on the old device")
+			}
+			if _, err := net.InterfaceByName(name); err != nil {
+				return err
+			}
+			return nil
+		})
+		t.Logf("%s replaced by %s", old, sys.Interface())
+		expect(t, "subnet route after recreate", "bravo gw 198.51.100.137:22", func() (string, error) { return readLine("198.51.100.137:22") })
+		ip := fakeFor("web.alpha.")
+		expect(t, "fake IP after recreate", "alpha web", func() (string, error) { return get("http://" + ip.String() + "/") })
+	})
+
 	t.Run("system resolver", func(t *testing.T) {
 		if !sys.DNSActive() {
 			if os.Getenv("TAILMUX_TUN_E2E_REQUIRE_DNS") != "" {
