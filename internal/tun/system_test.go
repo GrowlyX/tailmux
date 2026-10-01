@@ -197,14 +197,14 @@ func TestSystem(t *testing.T) {
 		// What a fatal device error does: the engine closes the device,
 		// and on macOS the utun disappears with its routes.
 		old := sys.Interface()
-		sys.devMu.Lock()
+		sys.mu.Lock()
 		dev := sys.dev
-		sys.devMu.Unlock()
+		sys.mu.Unlock()
 		dev.Close()
 		lab.Eventually(t, "new device", 30*time.Second, func() error {
-			sys.devMu.Lock()
+			sys.mu.Lock()
 			cur, name := sys.dev, sys.ifname
-			sys.devMu.Unlock()
+			sys.mu.Unlock()
 			if cur == dev || cur == nil {
 				return fmt.Errorf("still on the old device")
 			}
