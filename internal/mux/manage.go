@@ -55,6 +55,7 @@ func (m *Mux) AddTailnet(tc TailnetConfig) (*Tailnet, error) {
 	if ctx != nil {
 		if err := t.start(ctx); err != nil {
 			m.dropTailnet(tc.Name)
+			t.close()
 			return nil, err
 		}
 	}
