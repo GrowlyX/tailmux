@@ -15,6 +15,8 @@ import (
 
 type recordingOS struct {
 	calls   []string
+	flushes int
+	lostDNS bool
 	onUp    func()
 	onClose func()
 }
@@ -34,12 +36,13 @@ func (o *recordingOS) delRoute(string, netip.Prefix) error {
 	o.calls = append(o.calls, "delete route")
 	return nil
 }
-func (o *recordingOS) setDNS(string, []string, netip.Addr) (bool, error) {
+func (o *recordingOS) setDNS(string, []string, []string, netip.Addr) (bool, error) {
 	o.calls = append(o.calls, "DNS")
+	o.lostDNS = false
 	return true, nil
 }
-func (*recordingOS) dnsIntact(string, []string) bool { return true }
-func (*recordingOS) flushDNS()                       {}
+func (o *recordingOS) dnsIntact(string, []string, []string) bool { return !o.lostDNS }
+func (o *recordingOS) flushDNS()                                 { o.flushes++ }
 func (o *recordingOS) close(string) error {
 	o.calls = append(o.calls, "close")
 	if o.onClose != nil {
@@ -170,6 +173,35 @@ func TestDeviceCloseWaitsForRepair(t *testing.T) {
 	s.Repair("")
 	if len(o.calls) == 0 || o.calls[0] != "up" {
 		t.Fatal("replacement could not be configured")
+	}
+	s.dev.Close()
+}
+
+func TestReconcileSearchDomains(t *testing.T) {
+	o := &recordingOS{}
+	s := lifecycleSystem(t, o)
+	s.dev = &systemDevice{Device: &countedDevice{}, system: s}
+	// No started tailnets: the old search list must be removed even though
+	// the sorted match domains have not changed.
+	s.searchDomains = []string{"alpha"}
+	s.cfg.TUN.NoDNS = true
+	s.reconcile(false)
+	if len(o.calls) != 0 {
+		t.Fatalf("no_dns configured DNS: %v", o.calls)
+	}
+	s.cfg.TUN.NoDNS = false
+	s.reconcile(false)
+	if len(o.calls) != 1 || o.calls[0] != "DNS" || len(s.searchDomains) != 0 || o.flushes != 1 {
+		t.Fatalf("search list not updated: calls=%v search=%v flushes=%d", o.calls, s.searchDomains, o.flushes)
+	}
+	s.reconcile(false)
+	if len(o.calls) != 1 || o.flushes != 1 {
+		t.Fatal("unchanged DNS configuration rewritten")
+	}
+	o.lostDNS = true
+	s.check()
+	if len(o.calls) != 3 || o.calls[1] != "up" || o.calls[2] != "DNS" || o.flushes != 2 {
+		t.Fatalf("lost DNS not repaired and flushed: calls=%v flushes=%d", o.calls, o.flushes)
 	}
 	s.dev.Close()
 }

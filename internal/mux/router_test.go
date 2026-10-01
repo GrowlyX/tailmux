@@ -196,3 +196,18 @@ func TestIsNotFound(t *testing.T) {
 		}
 	}
 }
+
+func TestSearchDomains(t *testing.T) {
+	r := NewRouter([]Snapshot{
+		{Name: "home", Priority: 2, Reconnecting: true},
+		{Name: "disabled", Priority: 0},
+		{Name: "work", Priority: 1, Running: true, SplitDNS: []string{"corp.internal"}},
+	}, Pins{Domains: map[string]string{"pinned.example": "work"}})
+	if got := r.SearchDomains(); !slices.Equal(got, []string{"work", "home"}) {
+		t.Fatalf("SearchDomains = %v", got)
+	}
+	r.nets[1].Running = false
+	if got := r.SearchDomains(); !slices.Equal(got, []string{"home"}) {
+		t.Fatalf("SearchDomains after stop = %v", got)
+	}
+}

@@ -227,6 +227,9 @@ func TestSystem(t *testing.T) {
 			t.Skipf("no per-domain DNS on this host (%s without systemd-resolved)", runtime.GOOS)
 		}
 		// Plain hostnames, resolved by the OS: this is the whole point.
+		if runtime.GOOS == "darwin" {
+			expect(t, "http://web/", "alpha web", func() (string, error) { return get("http://web/") })
+		}
 		expect(t, "http://web.bravo/", "bravo web", func() (string, error) { return get("http://web.bravo/") })
 		expect(t, "http://web.charlie.example.ts.net/", "charlie web", func() (string, error) { return get("http://web.charlie.example.ts.net/") })
 		expect(t, "db.corp.internal:5432", "charlie gw 203.0.113.200:5432", func() (string, error) { return readLine("db.corp.internal:5432") })
@@ -238,8 +241,10 @@ func TestSystem(t *testing.T) {
 			t.Fatal(err)
 		}
 		if runtime.GOOS == "darwin" {
-			if _, err := os.Stat("/etc/resolver/bravo"); !os.IsNotExist(err) {
-				t.Errorf("resolver file left behind: %v", err)
+			for _, name := range []string{"bravo", "search.tailmux"} {
+				if _, err := os.Stat("/etc/resolver/" + name); !os.IsNotExist(err) {
+					t.Errorf("resolver %s left behind: %v", name, err)
+				}
 			}
 		}
 		if _, err := net.InterfaceByName(sys.Interface()); err == nil {

@@ -23,6 +23,14 @@ TCP and UDP flow. tailmux maps fake IPs back to names and re-dials each flow
 through the owning tailnet. So `ssh db.home`, `psql -h db.corp.internal` and
 `http://grafana.lab` in a browser all just work.
 
+On macOS, TUN mode also installs DNS search domains, so `ssh db` works
+without a suffix. Tailmux tries active tailnet aliases in configuration order
+(`db.work`, then `db.home`, for example). The first successful lookup wins;
+use an explicit suffix when the same hostname exists in several tailnets.
+Search domains update as tailnets are enabled or disabled, remain during
+reconnection, and are removed when the daemon stops. Existing LAN and VPN
+resolver files are preserved. `"no_dns": true` disables this DNS integration.
+
 ## Safety
 
 - **Your LAN stays yours.** A subnet that overlaps a local network is skipped
@@ -55,6 +63,6 @@ If anything ever looks stale, `tailmux repair` does the same by hand.
 
 ## Limits
 
-- Bare hostnames like `db` need a suffix in TUN mode (`db.home`), because
-  tailmux doesn't install search domains.
+- On Linux and Windows, bare hostnames like `db` still need a suffix in TUN
+  mode (`db.home`). Automatic search domains are currently macOS only.
 - IPv6 ping isn't forwarded.
