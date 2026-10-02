@@ -370,3 +370,15 @@ func (r *Router) PeerAddrs() []netip.Prefix {
 	slices.SortFunc(out, func(a, b netip.Prefix) int { return a.Compare(b) })
 	return slices.Compact(out)
 }
+
+// SearchDomains lists active tailnet aliases in configuration priority order.
+// Unlike Claims, this order matters: the OS tries each suffix for bare names.
+func (r *Router) SearchDomains() []string {
+	var domains []string
+	for _, n := range r.nets {
+		if n.active() {
+			domains = append(domains, n.Name)
+		}
+	}
+	return domains
+}

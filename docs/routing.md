@@ -10,7 +10,9 @@
    that tailnet can't reach, like a public IP, the connection goes direct.
    Tailscale's catch-all `ts.net` route is ignored, since every tailnet has it.
 5. **Bare hostnames** like `db`, matched against every tailnet's peers. An
-   online peer wins, then config order. This works in proxy mode only.
+   online peer wins, then config order in proxy mode. In macOS TUN mode, the
+   OS instead tries tailnet search suffixes in configuration order; the first
+   successful lookup wins. Use `db.home` to select a specific tailnet.
 6. **Anything else** is resolved normally. If the answer falls in a tailnet's
    subnet route, it goes there. Otherwise it goes direct.
 

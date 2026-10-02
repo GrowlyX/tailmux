@@ -40,7 +40,7 @@ func (linuxOS) delRoute(ifname string, p netip.Prefix) error {
 // setDNS uses systemd-resolved's per-link routing domains ("~dom"), so
 // only tailnet names come here. Without resolved there is no standard
 // per-domain mechanism, and tailmux leaves /etc/resolv.conf alone.
-func (linuxOS) setDNS(ifname string, domains []string, server netip.Addr) (bool, error) {
+func (linuxOS) setDNS(ifname string, domains, _ []string, server netip.Addr) (bool, error) {
 	if !resolvedRunning() {
 		return false, nil
 	}
@@ -61,7 +61,7 @@ func (linuxOS) setDNS(ifname string, domains []string, server netip.Addr) (bool,
 	return true, nil
 }
 
-func (linuxOS) dnsIntact(ifname string, domains []string) bool {
+func (linuxOS) dnsIntact(ifname string, domains, _ []string) bool {
 	if !resolvedRunning() || len(domains) == 0 {
 		return true
 	}

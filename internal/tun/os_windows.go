@@ -99,7 +99,7 @@ const (
 	nrptMaxNames = 50
 )
 
-func (w windowsOS) setDNS(_ string, domains []string, server netip.Addr) (bool, error) {
+func (w windowsOS) setDNS(_ string, domains, _ []string, server netip.Addr) (bool, error) {
 	w.removeNRPT()
 	for i := 0; i*nrptMaxNames < len(domains); i++ {
 		chunk := domains[i*nrptMaxNames : min(len(domains), (i+1)*nrptMaxNames)]
@@ -128,7 +128,7 @@ func (w windowsOS) setDNS(_ string, domains []string, server netip.Addr) (bool, 
 	return true, nil
 }
 
-func (windowsOS) dnsIntact(_ string, domains []string) bool {
+func (windowsOS) dnsIntact(_ string, domains, _ []string) bool {
 	if len(domains) == 0 {
 		return true
 	}

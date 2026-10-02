@@ -2,6 +2,7 @@ package tun
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -24,10 +25,11 @@ type osConfig interface {
 	addRoute(ifname string, p netip.Prefix) error
 	delRoute(ifname string, p netip.Prefix) error
 	// setDNS routes queries for domains (and their subdomains) to server.
+	// searchDomains supplies ordered suffixes for bare names where supported.
 	// It reports false if the OS offers no way to do that.
-	setDNS(ifname string, domains []string, server netip.Addr) (bool, error)
+	setDNS(ifname string, domains, searchDomains []string, server netip.Addr) (bool, error)
 	// dnsIntact reports whether the OS still has what setDNS configured.
-	dnsIntact(ifname string, domains []string) bool
+	dnsIntact(ifname string, domains, searchDomains []string) bool
 	// flushDNS drops cached answers (including cached failures).
 	flushDNS()
 	close(ifname string) error
@@ -42,17 +44,19 @@ type System struct {
 	os   osConfig
 	fake *FakeIPs
 
-	devMu  sync.Mutex
+	// mu keeps OS configuration and device closure in the same lifetime.
+	mu     sync.Mutex
 	dev    wgtun.Device
 	ifname string
 
-	mu        sync.Mutex
-	routes    map[netip.Prefix]bool
-	domains   []string
-	dnsActive bool
-	skipped   map[netip.Prefix]bool
-	cancel    context.CancelFunc
-	done      chan struct{}
+	closeErr      error
+	routes        map[netip.Prefix]bool
+	domains       []string
+	searchDomains []string
+	dnsActive     bool
+	skipped       map[netip.Prefix]bool
+	cancel        context.CancelFunc
+	done          chan struct{}
 }
 
 // Start creates the TUN device and starts routing tailnet traffic
@@ -82,6 +86,8 @@ func Start(ctx context.Context, m *mux.Mux, cfg *mux.Config) (*System, error) {
 // newDevice creates the TUN device and its engine, makes it current and
 // addresses it. Routes and DNS are up to the caller.
 func (s *System) newDevice() (*Engine, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	name := s.cfg.TUN.Name
 	if name == "" {
 		name = defaultTUNName
@@ -100,14 +106,38 @@ func (s *System) newDevice() (*Engine, error) {
 		dev.Close()
 		return nil, err
 	}
-	s.devMu.Lock()
-	s.dev, s.ifname = dev, ifname
-	s.devMu.Unlock()
 	if err := s.os.up(ifname, s.fake.Gateway(), s.fake.Prefix(), s.cfg.TUN.MTU); err != nil {
 		eng.close()
 		return nil, fmt.Errorf("configure %s: %w", ifname, err)
 	}
+	// Publish only a configured device. Every close (including the engine's
+	// fatal-error path) must retire it before the OS can reuse its name.
+	owned := &systemDevice{Device: dev, system: s}
+	eng.dev = owned
+	s.dev, s.ifname = owned, ifname
 	return eng, nil
+}
+
+type systemDevice struct {
+	wgtun.Device
+	system *System
+}
+
+func (d *systemDevice) Close() error {
+	s := d.system
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dev != d {
+		return nil // already retired; a replacement may have the same name
+	}
+	s.dev = nil
+	s.dnsActive = false
+	s.domains = nil
+	s.searchDomains = nil
+	clear(s.routes)
+	// Per-interface cleanup must run while we still own the interface.
+	s.closeErr = errors.Join(s.os.close(s.ifname), d.Device.Close())
+	return s.closeErr
 }
 
 // run keeps a device running until ctx ends. When the engine stops on
@@ -142,10 +172,6 @@ func (s *System) run(ctx context.Context, eng *Engine) {
 			}
 			log.Printf("tun: recreate: %v", err)
 		}
-		// Routes on the old interface went away with it.
-		s.mu.Lock()
-		clear(s.routes)
-		s.mu.Unlock()
 		s.reconcile(true)
 		s.os.flushDNS()
 		log.Printf("tun      %s  (replaces %s)", s.Interface(), old)
@@ -168,33 +194,22 @@ func interfaceGone(name string) bool {
 	return true
 }
 
-// kick closes the device if it is still the one named ifname, so run
-// replaces it.
-func (s *System) kick(ifname string) {
-	s.devMu.Lock()
-	dev := s.dev
-	if s.ifname != ifname {
-		dev = nil
-	}
-	if dev != nil {
-		s.dev = nil // report and close it once
-	}
-	s.devMu.Unlock()
-	if dev != nil {
-		log.Printf("tun: interface %s is gone", ifname)
-		dev.Close()
-	}
-}
-
 // Repair re-applies everything tailmux set up in the OS (interface
 // address, every route, the DNS configuration) and flushes the OS DNS
 // cache. The network watcher calls it after sleep and network changes;
 // `tailmux repair` calls it by hand.
 func (s *System) Repair(reason string) {
-	ifname := s.Interface()
+	s.mu.Lock()
+	dev, ifname := s.dev, s.ifname
+	if dev == nil {
+		s.mu.Unlock()
+		return
+	}
 	if interfaceGone(ifname) {
 		// Nothing to re-apply to; run re-applies on the new device.
-		s.kick(ifname)
+		s.mu.Unlock()
+		log.Printf("tun: interface %s is gone", ifname)
+		dev.Close()
 		return
 	}
 	if reason != "" {
@@ -203,7 +218,8 @@ func (s *System) Repair(reason string) {
 	if err := s.os.up(ifname, s.fake.Gateway(), s.fake.Prefix(), s.cfg.TUN.MTU); err != nil {
 		log.Printf("tun: re-configure %s: %v", ifname, err)
 	}
-	s.reconcile(true)
+	s.reconcileLocked(true)
+	s.mu.Unlock()
 	s.os.flushDNS()
 }
 
@@ -237,7 +253,7 @@ func (s *System) watchNetwork(ctx context.Context) {
 			nfp := netFingerprint(ifname)
 			switch {
 			case interfaceGone(ifname):
-				s.kick(ifname)
+				s.Repair("")
 			case slept:
 				s.Repair("woke from sleep")
 				again = time.After(20 * time.Second)
@@ -257,14 +273,15 @@ func (s *System) watchNetwork(ctx context.Context) {
 // check is the cheap periodic version of Repair: it only rewrites DNS
 // and flushes when the OS lost the configuration.
 func (s *System) check() {
-	s.reconcile(true)
 	s.mu.Lock()
-	domains, active := s.domains, s.dnsActive
+	domains, searchDomains, active := s.domains, s.searchDomains, s.dnsActive
 	s.mu.Unlock()
-	if active && !s.cfg.TUN.NoDNS && !s.os.dnsIntact(s.Interface(), domains) {
+	if active && !s.cfg.TUN.NoDNS && !s.os.dnsIntact(s.Interface(), domains, searchDomains) {
 		log.Printf("tun: DNS configuration was lost; restoring it")
 		s.Repair("")
+		return
 	}
+	s.reconcile(true)
 }
 
 // netFingerprint summarizes the machine's other interfaces and their
@@ -288,8 +305,8 @@ func netFingerprint(skip string) string {
 // Interface is the current device's name. It changes if the device is
 // recreated.
 func (s *System) Interface() string {
-	s.devMu.Lock()
-	defer s.devMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.ifname
 }
 
@@ -308,12 +325,20 @@ func (s *System) DNSActive() bool {
 func (s *System) reconcile(force bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	ifname := s.Interface()
+	s.reconcileLocked(force)
+}
+
+func (s *System) reconcileLocked(force bool) {
+	if s.dev == nil {
+		return
+	}
+	ifname := s.ifname
 	if force {
 		clear(s.skipped) // local networks may have changed
 	}
 	r := s.m.Router()
 	prefixes, domains := r.Claims()
+	searchDomains := r.SearchDomains()
 	// Devices' own addresses: a name in public DNS pointing at a tailnet
 	// device (grafana.example.com -> 100.x) has to land here too. A /32
 	// beats the official client's 100.64.0.0/10, so both can coexist.
@@ -360,15 +385,19 @@ func (s *System) reconcile(force bool) {
 			s.routes[p] = true
 		}
 	}
-	if s.cfg.TUN.NoDNS || (!force && slices.Equal(domains, s.domains)) {
+	if s.cfg.TUN.NoDNS || (!force && slices.Equal(domains, s.domains) && slices.Equal(searchDomains, s.searchDomains)) {
 		return
 	}
-	ok, err := s.os.setDNS(ifname, domains, s.fake.DNS())
+	ok, err := s.os.setDNS(ifname, domains, searchDomains, s.fake.DNS())
 	if err != nil {
 		log.Printf("tun: dns: %v", err)
 		return
 	}
-	s.domains, s.dnsActive = domains, ok
+	searchChanged := !slices.Equal(searchDomains, s.searchDomains)
+	s.domains, s.searchDomains, s.dnsActive = domains, searchDomains, ok
+	if ok && searchChanged {
+		s.os.flushDNS()
+	}
 	if ok && len(domains) > 0 {
 		log.Printf("tun: resolving %s via %s", strings.Join(domains, ", "), s.fake.DNS())
 	}
@@ -377,7 +406,9 @@ func (s *System) reconcile(force bool) {
 func (s *System) Close() error {
 	s.cancel()
 	<-s.done
-	return s.os.close(s.Interface())
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closeErr
 }
 
 func localPrefixes(skip string) []netip.Prefix {

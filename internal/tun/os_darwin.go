@@ -2,11 +2,14 @@ package tun
 
 import (
 	"bytes"
+	"fmt"
 	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"tailscale.com/util/dnsname"
 )
 
 const defaultTUNName = "utun"
@@ -14,6 +17,8 @@ const defaultTUNName = "utun"
 // resolverDir holds macOS per-domain resolver files (man 5 resolver).
 // mDNSResponder picks up changes on its own.
 var resolverDir = "/etc/resolver"
+
+const searchResolverFile = "search.tailmux"
 
 const resolverMarker = "# managed by tailmux; removed when it stops\n"
 
@@ -53,11 +58,34 @@ func (darwinOS) delRoute(ifname string, p netip.Prefix) error {
 	return run("/sbin/route", "-q", "-n", "delete", family(p), "-net", p.String(), "-interface", ifname)
 }
 
-func (d darwinOS) setDNS(ifname string, domains []string, server netip.Addr) (bool, error) {
+func (d darwinOS) setDNS(ifname string, domains, searchDomains []string, server netip.Addr) (bool, error) {
 	if err := os.MkdirAll(resolverDir, 0o755); err != nil {
 		return false, err
 	}
+	searchBody, err := searchResolverBody(searchDomains)
+	if err != nil {
+		return false, err
+	}
+	for _, dom := range domains {
+		if dom == searchResolverFile {
+			return false, fmt.Errorf("DNS domain %q is reserved for search domains", dom)
+		}
+	}
 	want := map[string]bool{}
+	if len(searchDomains) > 0 {
+		path := filepath.Join(resolverDir, searchResolverFile)
+		cur, err := os.ReadFile(path)
+		if err != nil && !os.IsNotExist(err) {
+			return false, err
+		}
+		if err == nil && !bytes.HasPrefix(cur, []byte(resolverMarker)) {
+			return false, fmt.Errorf("DNS search resolver %s is not owned by tailmux", path)
+		}
+		if err := os.WriteFile(path, searchBody, 0o644); err != nil {
+			return false, err
+		}
+		want[searchResolverFile] = true
+	}
 	body := []byte(resolverMarker + "nameserver " + server.String() + "\n")
 	for _, dom := range domains {
 		if dom == "" || strings.ContainsAny(dom, "/\\") {
@@ -76,7 +104,7 @@ func (d darwinOS) setDNS(ifname string, domains []string, server netip.Addr) (bo
 	return true, nil
 }
 
-func (darwinOS) dnsIntact(_ string, domains []string) bool {
+func (darwinOS) dnsIntact(_ string, domains, searchDomains []string) bool {
 	for _, dom := range domains {
 		b, err := os.ReadFile(filepath.Join(resolverDir, dom))
 		if err != nil {
@@ -86,7 +114,24 @@ func (darwinOS) dnsIntact(_ string, domains []string) bool {
 			continue // someone else's file; setDNS leaves those alone too
 		}
 	}
-	return true
+	body, err := searchResolverBody(searchDomains)
+	if err != nil {
+		return false
+	}
+	b, err := os.ReadFile(filepath.Join(resolverDir, searchResolverFile))
+	if len(searchDomains) > 0 {
+		return err == nil && bytes.Equal(b, body)
+	}
+	return os.IsNotExist(err) || (err == nil && !bytes.HasPrefix(b, []byte(resolverMarker)))
+}
+
+func searchResolverBody(domains []string) ([]byte, error) {
+	for _, dom := range domains {
+		if err := dnsname.ValidLabel(dom); err != nil {
+			return nil, fmt.Errorf("invalid DNS search domain %q: %w", dom, err)
+		}
+	}
+	return []byte(resolverMarker + "search " + strings.Join(domains, " ") + "\n"), nil
 }
 
 // flushDNS clears the system resolver cache, including failures cached

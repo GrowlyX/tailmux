@@ -35,6 +35,9 @@ type Tailnet struct {
 	traffic  traffic
 	disabled atomic.Bool
 
+	startMu sync.Mutex // serializes initialization and cleanup
+	started bool       // tsnet cleans up its own failed Start
+
 	mu      sync.Mutex
 	snap    Snapshot
 	state   string
@@ -77,9 +80,12 @@ func (t *Tailnet) logf(format string, args ...any) {
 }
 
 func (t *Tailnet) start(ctx context.Context) error {
+	t.startMu.Lock()
+	defer t.startMu.Unlock()
 	if err := t.srv.Start(); err != nil {
 		return fmt.Errorf("%s: %w", t.cfg.Name, err)
 	}
+	t.started = true
 	lc, err := t.srv.LocalClient()
 	if err != nil {
 		return err
@@ -471,4 +477,11 @@ func (t *Tailnet) Status() TailnetStatus {
 	return s
 }
 
-func (t *Tailnet) close() error { return t.srv.Close() }
+func (t *Tailnet) close() error {
+	t.startMu.Lock()
+	defer t.startMu.Unlock()
+	if !t.started {
+		return nil
+	}
+	return t.srv.Close()
+}
