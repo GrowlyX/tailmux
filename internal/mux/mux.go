@@ -27,6 +27,9 @@ type Mux struct {
 	byName   map[string]*Tailnet
 	ctx      context.Context // set by Start; tailnets added later start with it
 	router   atomic.Pointer[Router]
+	exitCfg  atomic.Pointer[ExitNodeConfig]
+
+	localNets localNets
 
 	// ConfigPath, if set, is where tailnet and settings changes made
 	// through the API are saved.
@@ -67,8 +70,15 @@ func New(cfg *Config, o Options) *Mux {
 	m.direct.Timeout = 15 * time.Second
 	for i, tc := range cfg.Tailnets {
 		t := newTailnet(tc, i, tailnetOpts{stateDir: cfg.StateDir, verbose: o.Verbose, memStore: o.MemStore}, m.rebuild)
+		if e := cfg.ExitNode; e != nil && e.Tailnet == tc.Name {
+			t.exitWant = e.Node
+		}
 		m.tailnets = append(m.tailnets, t)
 		m.byName[tc.Name] = t
+	}
+	if cfg.ExitNode != nil {
+		e := *cfg.ExitNode
+		m.exitCfg.Store(&e)
 	}
 	m.rebuild()
 	return m
@@ -213,9 +223,10 @@ func (m *Mux) Resolve(ctx context.Context, host string) (Target, error) {
 		return tgt, nil
 	}
 
-	// Nobody claims the name. Resolve it normally; the answer may still
-	// land inside some tailnet's subnet (internal names in public DNS).
-	ips, err := m.lookupSystem(ctx, host)
+	// Nobody claims the name. Resolve it normally (through the exit node,
+	// if there is one); the answer may still land inside some tailnet's
+	// subnet (internal names in public DNS).
+	ips, err := m.lookupUnclaimed(ctx, host)
 	if err != nil {
 		return tgt, err
 	}
@@ -242,6 +253,20 @@ func (m *Mux) resolveIn(ctx context.Context, t *Tailnet, name string) ([]netip.A
 	}
 	m.store(key, ips)
 	return ips, nil
+}
+
+// lookupUnclaimed resolves a name no tailnet claims: with the exit
+// node's resolver when one is set, so lookups don't leak to the local
+// network and answers fit where traffic comes out, else the system's.
+func (m *Mux) lookupUnclaimed(ctx context.Context, host string) ([]netip.Addr, error) {
+	if m.ExitNode() == nil || localName(host) {
+		return m.lookupSystem(ctx, host)
+	}
+	t, err := m.exitTailnet()
+	if err != nil {
+		return nil, err
+	}
+	return m.resolveIn(ctx, t, host)
 }
 
 func (m *Mux) lookupSystem(ctx context.Context, host string) ([]netip.Addr, error) {
@@ -298,9 +323,9 @@ func (m *Mux) Dial(ctx context.Context, network, addr string) (net.Conn, Target,
 
 var ErrNotInTailnet = errors.New("destination is not in any tailnet")
 
-// DialTailnet is Dial without the direct fallback. The TUN device uses it:
-// its traffic was routed here by the OS, so dialing it "directly" would
-// loop straight back into the TUN.
+// DialTailnet is Dial without the direct fallback (the exit node still
+// applies). The TUN device uses it: its traffic was routed here by the
+// OS, so dialing it "directly" would loop straight back into the TUN.
 func (m *Mux) DialTailnet(ctx context.Context, network, addr string) (net.Conn, Target, error) {
 	return m.dial(ctx, network, addr, false)
 }
@@ -318,12 +343,22 @@ func (m *Mux) dial(ctx context.Context, network, addr string, allowDirect bool) 
 		return nil, tgt, err
 	}
 	dial := m.direct.DialContext
+	remote := slices.DeleteFunc(slices.Clone(tgt.IPs), m.isLocal)
 	if tgt.Tailnet != "" {
 		tn := m.get(tgt.Tailnet)
 		if tn == nil {
 			return nil, tgt, fmt.Errorf("tailnet %s was removed", tgt.Tailnet)
 		}
 		dial = tn.Dial
+	} else if e := m.ExitNode(); e != nil && len(remote) > 0 {
+		tn, err := m.exitTailnet()
+		if err != nil {
+			return nil, tgt, err
+		}
+		dial = tn.Dial
+		tgt.IPs = remote
+		tgt.Tailnet = e.Tailnet
+		tgt.Decision = Decision{Tailnet: e.Tailnet, Kind: KindExit, Peer: e.Node}
 	} else if !allowDirect {
 		if !*m.cfg.Direct {
 			return nil, tgt, ErrDirectDisabled
@@ -346,7 +381,7 @@ func (m *Mux) dial(ctx context.Context, network, addr string, allowDirect bool) 
 
 // LogDial logs a connection the way every frontend does.
 func (m *Mux) LogDial(kind string, tgt Target, err error) {
-	if err == nil && tgt.Tailnet == "" && !m.verbose {
+	if err == nil && (tgt.Tailnet == "" || tgt.Decision.Kind == KindExit) && !m.verbose {
 		return
 	}
 	if err != nil {

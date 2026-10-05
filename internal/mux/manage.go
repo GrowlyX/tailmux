@@ -78,9 +78,15 @@ func (m *Mux) RemoveTailnet(name string) error {
 		return os.ErrNotExist
 	}
 	go t.close()
+	if e := m.ExitNode(); e != nil && e.Tailnet == name {
+		m.exitCfg.Store(nil)
+	}
 	m.rebuild()
 	m.saveDisabled()
 	return m.editConfig(func(c *Config) {
+		if c.ExitNode != nil && strings.EqualFold(c.ExitNode.Tailnet, name) {
+			c.ExitNode = nil
+		}
 		c.Tailnets = slices.DeleteFunc(c.Tailnets, func(x TailnetConfig) bool { return strings.EqualFold(x.Name, name) })
 		for k, v := range c.Pins {
 			if strings.EqualFold(v, name) {

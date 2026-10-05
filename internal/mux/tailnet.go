@@ -46,6 +46,10 @@ type Tailnet struct {
 	err     string
 	// split-DNS domain -> resolver addresses, for names we resolve ourselves
 	splitRes map[string][]netip.AddrPort
+
+	exitWant string               // exit node to use, as configured; "" for none
+	exitID   tailcfg.StableNodeID // exit node the node is set to use
+	exitErr  string               // why exitWant isn't in use
 }
 
 type tailnetOpts struct {
@@ -173,6 +177,11 @@ func (t *Tailnet) refresh(ctx context.Context) {
 		if p.Name == "" {
 			p.Name = strings.ToLower(ps.HostName)
 		}
+		p.ID = string(ps.ID)
+		p.Exit = ps.ExitNodeOption
+		if l := ps.Location; l != nil {
+			p.Location = Location{Country: l.Country, CountryCode: l.CountryCode, City: l.City, CityCode: l.CityCode, Priority: l.Priority}
+		}
 		if ps.PrimaryRoutes != nil {
 			for _, r := range ps.PrimaryRoutes.All() {
 				if r.Bits() > 0 { // skip exit-node default routes
@@ -218,10 +227,118 @@ func (t *Tailnet) refresh(ctx context.Context) {
 	t.selfIPs = st.TailscaleIPs
 	t.splitRes = splitRes
 	t.err = ""
+	if st.ExitNodeStatus != nil {
+		t.exitID = st.ExitNodeStatus.ID
+	} else {
+		t.exitID = ""
+	}
 	t.mu.Unlock()
+	if t.syncExitNode(ctx, snap) {
+		changed = true
+	}
 	if changed && t.onChange != nil {
 		t.onChange()
 	}
+}
+
+// syncExitNode points the node's exit node preference at exitWant (or
+// clears it), and reports whether that changed anything.
+func (t *Tailnet) syncExitNode(ctx context.Context, snap Snapshot) bool {
+	t.mu.Lock()
+	want, cur := t.exitWant, t.exitID
+	t.mu.Unlock()
+	var id tailcfg.StableNodeID
+	var why string
+	if want != "" {
+		switch p := findPeer(snap.Peers, want); {
+		case p == nil && !snap.Running:
+			why = "tailnet " + t.cfg.Name + " is not running"
+		case p == nil:
+			why = fmt.Sprintf("no device %q in tailnet %s", want, t.cfg.Name)
+		case !p.Exit:
+			why = fmt.Sprintf("%s does not offer itself as an exit node", p.Name)
+		default:
+			// Not refused when it looks offline: Mullvad's nodes don't
+			// report presence. The status shows it either way.
+			id = tailcfg.StableNodeID(p.ID)
+		}
+	}
+	t.mu.Lock()
+	t.exitErr = why
+	t.mu.Unlock()
+	if id == cur || (id == "" && want != "" && !snap.Running) {
+		// Nothing to do, or not running yet: keep what's there until we
+		// know which node the name means.
+		return false
+	}
+	if _, err := t.lc.EditPrefs(ctx, &ipn.MaskedPrefs{
+		Prefs:         ipn.Prefs{ExitNodeID: id},
+		ExitNodeIDSet: true,
+		ExitNodeIPSet: true, // clears any exit node set by IP
+	}); err != nil {
+		t.mu.Lock()
+		t.exitErr = "set exit node: " + err.Error()
+		t.mu.Unlock()
+		return false
+	}
+	t.mu.Lock()
+	t.exitID = id
+	t.mu.Unlock()
+	if id != "" {
+		t.logf("exit node: %s", want)
+	} else {
+		t.logf("exit node: none")
+	}
+	return true
+}
+
+// findPeer finds a device by stable ID, MagicDNS name, short name or
+// Tailscale IP.
+func findPeer(peers []Peer, spec string) *Peer {
+	spec = normName(spec)
+	for i := range peers {
+		p := &peers[i]
+		if strings.EqualFold(p.ID, spec) || strings.EqualFold(p.FQDN, spec) || strings.EqualFold(p.Name, spec) {
+			return p
+		}
+		for _, ip := range p.IPs {
+			if ip.String() == spec {
+				return p
+			}
+		}
+	}
+	return nil
+}
+
+// setExitNode makes this tailnet use spec as its exit node ("" for none)
+// and applies it right away.
+func (t *Tailnet) setExitNode(ctx context.Context, spec string) {
+	t.mu.Lock()
+	t.exitWant = spec
+	t.mu.Unlock()
+	if t.lc != nil {
+		t.refresh(ctx)
+	}
+}
+
+// exitReady reports whether traffic sent to this tailnet's Dial with a
+// non-tailnet destination leaves through the configured exit node.
+func (t *Tailnet) exitReady() (bool, string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.exitWant == "" {
+		return false, "no exit node"
+	}
+	if !t.snap.Running || !t.Enabled() {
+		return false, "tailnet " + t.cfg.Name + " is not running"
+	}
+	if t.exitErr != "" {
+		return false, t.exitErr
+	}
+	if t.exitID == "" {
+		return false, "exit node not set yet"
+	}
+	return true, ""
 }
 
 func snapEqual(a, b Snapshot) bool {

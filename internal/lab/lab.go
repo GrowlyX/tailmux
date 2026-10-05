@@ -106,6 +106,26 @@ func (f *Tailnet) Gateway(t *testing.T, ctx context.Context, routes ...string) {
 	f.Control.SetSubnetRoutes(st.Self.PublicKey, pfxs)
 }
 
+// ExitNode adds an exit node named host. Traffic through it never
+// reaches the internet: it answers any TCP connection with
+// "<tailnet> <host> <dst>", so tests can tell which exit carried it.
+func (f *Tailnet) ExitNode(t *testing.T, ctx context.Context, host string) {
+	s, _ := f.Node(t, ctx, host)
+	s.RegisterFallbackTCPHandler(func(src, dst netip.AddrPort) (func(net.Conn), bool) {
+		return func(c net.Conn) {
+			fmt.Fprintf(c, "%s %s %s\n", f.Name, host, dst)
+			c.Close()
+		}, true
+	})
+	exit := []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0")}
+	lc, _ := s.LocalClient()
+	if _, err := lc.EditPrefs(ctx, &ipn.MaskedPrefs{Prefs: ipn.Prefs{AdvertiseRoutes: exit}, AdvertiseRoutesSet: true}); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := lc.Status(ctx)
+	f.Control.SetSubnetRoutes(st.Self.PublicKey, exit)
+}
+
 // splitDNS runs a resolver node answering *.<zone> with answer, and
 // tells control to route that zone to it.
 //
