@@ -18,6 +18,7 @@ provides=('tailmux')
 conflicts=('tailmux' 'tailmux-cli')
 source=("tailmux::git+$url.git")
 sha256sums=('SKIP')
+options=('!debug') # the binary is stripped
 
 prepare() {
   cd tailmux
