@@ -3,7 +3,7 @@ import ServiceManagement
 import SwiftUI
 
 /// The dropdown: header, live throughput chart, one row per tailnet with
-/// an on/off switch, and a footer. Everything is plain SwiftUI (no
+/// an on/off switch, and the exit node. Everything is plain SwiftUI (no
 /// AppKit-backed controls) so it also renders in snapshot mode.
 struct PanelView: View {
     @ObservedObject var store: Store
@@ -23,11 +23,16 @@ struct PanelView: View {
                     ForEach(Array(store.tailnets.enumerated()), id: \.element.id) { i, t in
                         TailnetRow(tailnet: t, color: Palette.color(i), store: store)
                     }
+                    if !store.exitNodes.isEmpty || store.exitNode != nil {
+                        Divider().padding(.horizontal, 8).padding(.vertical, 4)
+                        ExitNodeRow(store: store, snapshot: snapshot)
+                    }
                 }
             }
         }
         .padding(14)
         .frame(width: 372)
+        .onAppear { Task { await store.refreshExitNodes() } }
     }
 
     private var header: some View {
@@ -201,6 +206,170 @@ struct TailnetRow: View {
         }
         return lines.joined(separator: "\n")
     }
+}
+
+/// The exit node: what's chosen and whether it works. Clicking opens the
+/// picker menu.
+struct ExitNodeRow: View {
+    @ObservedObject var store: Store
+    var snapshot = false
+    @StateObject private var hover = Flag()
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle().fill(dotColor).frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Exit node").font(.system(size: 13, weight: .medium)).lineLimit(1)
+                Text(detail).font(.system(size: 11)).foregroundStyle(detailColor).lineLimit(1)
+            }
+            .layoutPriority(1)
+            Spacer(minLength: 6)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(hover.on ? 0.06 : 0)))
+        .contentShape(Rectangle())
+        .onHover { hover.on = $0 }
+        .onTapGesture { if !snapshot { ExitMenu.popUp(store: store) } }
+        .opacity(store.exitPending ? 0.5 : 1)
+        .help(help)
+    }
+
+    private var detail: String {
+        if let e = store.exitError { return e }
+        guard let x = store.exitNode else { return "None" }
+        if !x.active { return x.error ?? "Not available" }
+        return x.place + " · " + (x.location == nil ? x.tailnet : x.displayName)
+    }
+
+    private var dotColor: Color {
+        guard let x = store.exitNode else { return Color.secondary.opacity(0.35) }
+        return x.active ? .green : .orange
+    }
+
+    private var detailColor: Color {
+        if store.exitError != nil || store.exitNode?.active == false { return .orange }
+        return .secondary
+    }
+
+    private var help: String {
+        guard let x = store.exitNode else { return "Off: traffic no tailnet claims goes direct." }
+        var lines = ["\(x.fqdn ?? x.node) in \(x.tailnet)"]
+        lines.append("Everything no tailnet claims leaves through it; the local network stays direct.")
+        lines.append(store.status?.tun != nil ? "Covers every app (TUN mode)." : "Covers only apps using the tailmux proxy.")
+        if !x.active { lines.append((x.error ?? "Not available") + ". That traffic is blocked, not sent direct.") }
+        return lines.joined(separator: "\n")
+    }
+}
+
+/// The exit node picker, as a native menu like the official app's: None,
+/// your own exit nodes per tailnet, then Mullvad by country and city, each
+/// with "Best available".
+@MainActor
+enum ExitMenu {
+    static func popUp(store: Store) {
+        menu(store: store).popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    }
+
+    static func menu(store: Store) -> NSMenu {
+        let m = NSMenu()
+        m.autoenablesItems = false
+        let catalog = ExitCatalog(store.exitNodes)
+        if let x = store.exitNode, !x.active {
+            let warn = NSMenuItem(title: x.error ?? "Not available", action: nil, keyEquivalent: "")
+            warn.image = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: nil)
+            warn.isEnabled = false
+            m.addItem(warn)
+            m.addItem(.separator())
+        }
+        m.addItem(ActionItem("None", checked: store.exitNode == nil) { store.setExitNode(nil) })
+        for g in catalog.own {
+            m.addItem(.separator())
+            m.addItem(header(g.tailnet))
+            for n in g.nodes { m.addItem(item(n, title: n.name + (n.online ? "" : " (offline)"), store: store)) }
+        }
+        for p in catalog.located {
+            m.addItem(.separator())
+            m.addItem(header(p.title))
+            for c in p.countries {
+                let sub = NSMenu()
+                sub.autoenablesItems = false
+                sub.addItem(best(c.nodes, store: store))
+                sub.addItem(.separator())
+                // One city: its nodes go straight in the country's menu.
+                if c.cities.count == 1 {
+                    for n in c.nodes { sub.addItem(item(n, title: n.name, store: store)) }
+                }
+                for city in c.cities where c.cities.count > 1 {
+                    if city.nodes.count == 1 {
+                        sub.addItem(item(city.nodes[0], title: city.name, store: store))
+                        continue
+                    }
+                    let cm = NSMenu()
+                    cm.autoenablesItems = false
+                    cm.addItem(best(city.nodes, store: store))
+                    cm.addItem(.separator())
+                    for n in city.nodes { cm.addItem(item(n, title: n.name, store: store)) }
+                    sub.addItem(parent(city.name, cm, selected: city.nodes.contains(where: \.isSelected)))
+                }
+                m.addItem(parent(c.title, sub, selected: c.nodes.contains(where: \.isSelected)))
+            }
+        }
+        if catalog.isEmpty {
+            let none = NSMenuItem(title: "No device offers itself as an exit node", action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            m.addItem(none)
+        }
+        m.addItem(.separator())
+        m.addItem(ActionItem("Show All Exit Nodes…") { MainWindowController.shared.show(store: store, page: .exitNode) })
+        return m
+    }
+
+    private static func item(_ n: ExitNodeInfo, title: String, store: Store) -> NSMenuItem {
+        let i = ActionItem(title, checked: n.isSelected) { store.setExitNode(n) }
+        i.toolTip = ([n.fqdn] + (n.ips ?? [])).joined(separator: "\n")
+        return i
+    }
+
+    private static func best(_ nodes: [ExitNodeInfo], store: Store) -> NSMenuItem {
+        let n = ExitCatalog.best(nodes)
+        let i = ActionItem("Best Available") { if let n { store.setExitNode(n) } }
+        i.toolTip = n.map { "Picks \($0.name) now" }
+        return i
+    }
+
+    private static func parent(_ title: String, _ sub: NSMenu, selected: Bool) -> NSMenuItem {
+        let i = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        i.submenu = sub
+        i.state = selected ? .on : .off
+        return i
+    }
+
+    private static func header(_ title: String) -> NSMenuItem {
+        if #available(macOS 14, *) { return .sectionHeader(title: title) }
+        let i = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        i.isEnabled = false
+        return i
+    }
+}
+
+/// A menu item that runs a closure.
+final class ActionItem: NSMenuItem {
+    private let handler: () -> Void
+
+    init(_ title: String, checked: Bool = false, handler: @escaping () -> Void) {
+        self.handler = handler
+        super.init(title: title, action: #selector(fire), keyEquivalent: "")
+        target = self
+        state = checked ? .on : .off
+    }
+
+    required init(coder: NSCoder) { fatalError("not used") }
+
+    @objc private func fire() { handler() }
 }
 
 struct Sparkline: View {

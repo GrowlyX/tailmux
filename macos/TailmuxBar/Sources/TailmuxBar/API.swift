@@ -1,10 +1,11 @@
 import Foundation
 
-// Mirrors of the daemon's JSON (internal/mux/http.go, stats.go).
+// Mirrors of the daemon's JSON (internal/mux/http.go, stats.go, exit.go).
 
 struct StatusResponse: Decodable {
     var tailnets: [TailnetStatus]
     var tun: TUNInfo?
+    var exitNode: ExitStatus?
     var version: String?
     var update: UpdateInfo?
 }
@@ -65,6 +66,59 @@ struct PeerInfo: Decodable, Identifiable, Hashable {
     var ips: [String]?
     var online: Bool
     var routes: [String]?
+}
+
+/// Where an exit node is. Set for Mullvad nodes; every field may be absent.
+struct Location: Decodable, Hashable {
+    var country: String?
+    var countryCode: String?
+    var city: String?
+    var cityCode: String?
+    var priority: Int?
+
+    /// The country's flag, from its two-letter code.
+    var flag: String {
+        guard let cc = countryCode?.uppercased(), cc.count == 2 else { return "" }
+        return String(String.UnicodeScalarView(cc.unicodeScalars.compactMap { Unicode.Scalar(127397 + $0.value) }))
+    }
+}
+
+/// The chosen exit node and whether traffic can use it right now.
+struct ExitStatus: Decodable {
+    var tailnet: String
+    var node: String
+    var name: String?
+    var fqdn: String?
+    var online: Bool
+    var active: Bool
+    var location: Location?
+    var error: String?
+
+    var displayName: String { name.flatMap { $0.isEmpty ? nil : $0 } ?? node }
+}
+
+struct ExitNodeInfo: Decodable, Identifiable, Hashable {
+    var id: String
+    var tailnet: String
+    var name: String
+    var fqdn: String
+    var ips: [String]?
+    var online: Bool
+    var mullvad: Bool?
+    var location: Location?
+    var selected: Bool?
+
+    var isMullvad: Bool { mullvad ?? false }
+    var isSelected: Bool { selected ?? false }
+    var priority: Int { location?.priority ?? 0 }
+    /// What PUT /exit-node gets as "node": the MagicDNS name, else the ID.
+    var spec: String { fqdn.isEmpty ? id : fqdn }
+    var key: String { tailnet + "/" + id }
+}
+
+struct ExitNodesResponse: Decodable {
+    var current: ExitStatus?
+    var nodes: [ExitNodeInfo]?
 }
 
 struct ConfigView: Decodable {
@@ -168,6 +222,17 @@ struct API {
         req.setValue("1", forHTTPHeaderField: "X-Tailmux")
         let (data, resp) = try await API.session.data(for: req)
         try check(resp, data)
+    }
+
+    /// Picks an exit node, or turns it off with nil. Applies live.
+    @discardableResult
+    func setExitNode(tailnet: String?, node: String?) async throws -> ExitStatus? {
+        var body: [String: Any] = [:]
+        if let tailnet, let node {
+            body = ["tailnet": tailnet, "node": node]
+        }
+        let data = try await send("PUT", "exit-node", json: body)
+        return try decode(data, as: ExitNodesResponse.self).current
     }
 
     func startUpdate() async throws {
