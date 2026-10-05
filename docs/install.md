@@ -45,6 +45,17 @@ sudo tailmux service install     # systemd unit, TUN mode, config in /etc/tailmu
 tailmux service status
 ```
 
+## Uninstalling
+
+Uninstalling the app on Windows, or removing the `.deb`, also removes the
+service it installed (Windows asks for Administrator once more). The config
+and state are kept. To remove the service by hand, or after using the
+`.AppImage`:
+
+```sh
+sudo tailmux service uninstall   # Windows: tailmux service uninstall, as Administrator
+```
+
 ## Without an installer
 
 ```sh
