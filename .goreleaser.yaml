@@ -25,3 +25,26 @@ changelog:
   sort: asc
   filters:
     exclude: ["^docs:", "^ci:", "^chore\\(deps\\)"]
+
+# Headless packages: just the CLI and daemon, for servers and for people
+# who don't want the tray app. The desktop app's .deb/.rpm (built in the
+# release workflow) already contain tailmux, hence the conflict.
+nfpms:
+  - id: cli
+    package_name: tailmux-cli
+    file_name_template: "{{ .PackageName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    vendor: tailmux
+    homepage: https://github.com/GrowlyX/tailmux
+    maintainer: Subham K. <me@growly.gg>
+    description: Be on all your tailnets at once (CLI and daemon).
+    license: BSD-3-Clause
+    formats: [deb, rpm, apk, archlinux]
+    bindir: /usr/bin
+    section: net
+    conflicts: [tailmux]
+    dependencies: [iproute2]
+    overrides:
+      rpm:
+        dependencies: [iproute]
+    scripts:
+      postinstall: packaging/linux/postinstall.sh

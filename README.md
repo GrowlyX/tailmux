@@ -21,7 +21,7 @@ and subnets from every tailnet work side by side, even when two tailnets use the
 
 ## Docs
 
-- [Install](docs/install.md): macOS (Homebrew), Windows and Linux (desktop app), service modes
+- [Install](docs/install.md): macOS (Homebrew), Windows, Linux (`.deb`, `.rpm`, AppImage, Alpine, Arch, or from source), service modes
 - [Setup and config](docs/setup.md): the `tailmux setup` TUI and every config key
 - [Routing](docs/routing.md): how tailmux picks a tailnet, and what happens on conflicts
 - [TUN mode](docs/tun.md): proxy-free, for every app

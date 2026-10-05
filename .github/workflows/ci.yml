@@ -140,6 +140,74 @@ jobs:
 
   # The Windows/Linux desktop app: real installers, its API tests and
   # screenshots against a live daemon, and a screenshot of the real app.
+  # The headless packages GoReleaser builds, installed on the distros they
+  # are for, and `make` / the PKGBUILD's build from source on two of them.
+  linux-packages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean --skip=publish
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-packages
+          path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.apk
+            dist/*.pkg.tar.zst
+
+  linux-distros:
+    needs: linux-packages
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: debian:stable
+            install: apt-get update && apt-get install -y ./pkgs/tailmux-cli_*_linux_amd64.deb
+          - image: fedora:latest
+            install: dnf install -y ./pkgs/tailmux-cli_*_linux_amd64.rpm
+            source: dnf install -y golang make git
+          - image: alpine:latest
+            install: apk add --allow-untrusted ./pkgs/tailmux-cli_*_linux_amd64.apk
+          - image: archlinux:latest
+            # pacman's download sandbox doesn't work in every container
+            install: sed -i '/^\[options\]/a DisableSandbox' /etc/pacman.conf && pacman -Sy --noconfirm && pacman -U --noconfirm ./pkgs/tailmux-cli_*_linux_amd64.pkg.tar.zst
+            source: pacman -S --noconfirm go make git
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: linux-packages
+          path: pkgs
+      - name: install the package
+        run: ${{ matrix.install }}
+      - name: it runs
+        run: |
+          tailmux version
+          tailmux example-config > /tmp/config.json
+          command -v ip
+      - uses: actions/checkout@v7
+        if: matrix.source
+        with:
+          fetch-depth: 0
+      - name: make && make install
+        if: matrix.source
+        run: |
+          ${{ matrix.source }}
+          git config --global --add safe.directory "$PWD"
+          make
+          make install DESTDIR=/tmp/root PREFIX=/usr/local
+          /tmp/root/usr/local/bin/tailmux version
+
   desktop:
     strategy:
       fail-fast: false
@@ -184,7 +252,7 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm check
-          if [ "$RUNNER_OS" = Windows ]; then pnpm tauri build --bundles nsis,msi; else pnpm tauri build --bundles deb,appimage; fi
+          if [ "$RUNNER_OS" = Windows ]; then pnpm tauri build --bundles nsis,msi; else pnpm tauri build --bundles deb,rpm,appimage; fi
       - name: start lab tailnets and daemon
         run: |
           TAILMUX_LAB="$PWD/lab.json" go test ./internal/mux -run TestLab -timeout 0 > lab.log 2>&1 &

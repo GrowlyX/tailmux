@@ -47,8 +47,9 @@ jobs:
           ditto -c -k --keepParent dist/TailmuxBar.app "TailmuxBar_${GITHUB_REF_NAME#v}_macos.zip"
           gh release upload "$GITHUB_REF_NAME" "TailmuxBar_${GITHUB_REF_NAME#v}_macos.zip" --clobber
 
-  # The Windows and Linux desktop app, with the service bundled inside
-  # (and wintun.dll on Windows), attached to the release.
+  # The Windows and Linux desktop app (.deb, .rpm and AppImage on Linux),
+  # with the service bundled inside (and wintun.dll on Windows), attached
+  # to the release.
   desktop:
     needs: binaries
     strategy:
@@ -89,14 +90,14 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           version="${GITHUB_REF_NAME#v}"
-          if [ "$RUNNER_OS" = Windows ]; then bundles=nsis,msi; else bundles=deb,appimage; fi
+          if [ "$RUNNER_OS" = Windows ]; then bundles=nsis,msi; else bundles=deb,rpm,appimage; fi
           pnpm tauri build --bundles "$bundles" --config "{\"version\":\"$version\"}"
       - name: attach to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           shopt -s nullglob
-          files=(desktop/src-tauri/target/release/bundle/{deb/*.deb,appimage/*.AppImage,nsis/*.exe,msi/*.msi})
+          files=(desktop/src-tauri/target/release/bundle/{deb/*.deb,rpm/*.rpm,appimage/*.AppImage,nsis/*.exe,msi/*.msi})
           ls -la "${files[@]}"
           gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
 

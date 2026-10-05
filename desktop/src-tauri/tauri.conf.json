@@ -35,6 +35,17 @@
       "deb": {
         "depends": [
           "policykit-1"
+        ],
+        "conflicts": [
+          "tailmux-cli"
+        ]
+      },
+      "rpm": {
+        "depends": [
+          "polkit"
+        ],
+        "conflicts": [
+          "tailmux-cli"
         ]
       }
     },

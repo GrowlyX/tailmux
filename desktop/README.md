@@ -37,11 +37,16 @@ desktop/
 
 ## Develop
 
-Needs Rust (1.77+), Node 22+ and pnpm. On Linux also:
+Needs Rust (1.77+), Node 22+ and pnpm. On Linux also WebKitGTK and
+friends; [docs/install.md](../docs/install.md#build-from-source) lists the
+packages for Debian/Ubuntu, Fedora, Arch and openSUSE. On Debian/Ubuntu:
 
 ```sh
 sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libxdo-dev build-essential
 ```
+
+To build and install it from source without making a package, use the
+top-level Makefile: `make desktop && sudo make install-desktop`.
 
 ```sh
 cd desktop
@@ -80,8 +85,8 @@ CI commands:
 sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libxdo-dev build-essential
 cd desktop && pnpm install --frozen-lockfile
 cp ../dist/tailmux-linux-amd64 src-tauri/binaries/tailmux-x86_64-unknown-linux-gnu
-pnpm tauri build --bundles deb,appimage
-# artifacts: src-tauri/target/release/bundle/deb/*.deb, .../appimage/*.AppImage
+pnpm tauri build --bundles deb,rpm,appimage
+# artifacts: src-tauri/target/release/bundle/deb/*.deb, .../rpm/*.rpm, .../appimage/*.AppImage
 
 # windows-latest (PowerShell)
 cd desktop; pnpm install --frozen-lockfile
