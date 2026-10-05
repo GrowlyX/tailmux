@@ -1,6 +1,6 @@
 <script lang="ts">
-  // The full app: sidebar with Overview, Tailnets, Devices, Settings,
-  // Logs. Mirrors MainWindow.swift.
+  // The full app: sidebar with Overview, Tailnets, Devices, Exit node,
+  // Settings, Logs. Mirrors MainWindow.swift.
   import { onMount, untrack } from "svelte";
   import { store } from "./lib/store.svelte";
   import { manager, isPage } from "./lib/manager.svelte";
@@ -11,6 +11,7 @@
   import Overview from "./pages/Overview.svelte";
   import Tailnets from "./pages/Tailnets.svelte";
   import Devices from "./pages/Devices.svelte";
+  import ExitNode from "./pages/ExitNode.svelte";
   import Settings from "./pages/Settings.svelte";
   import Logs from "./pages/Logs.svelte";
 
@@ -42,6 +43,8 @@
         <Tailnets />
       {:else if manager.page === "devices"}
         <Devices />
+      {:else if manager.page === "exit-node"}
+        <ExitNode />
       {:else if manager.page === "settings"}
         <Settings />
       {:else}

@@ -5,7 +5,7 @@ import { get, send, type ConfigView, type PeerInfo, type TailnetStatus } from ".
 import { invoke } from "./bridge";
 import { store } from "./store.svelte";
 
-export const pages = ["overview", "tailnets", "devices", "settings", "logs"] as const;
+export const pages = ["overview", "tailnets", "devices", "exit-node", "settings", "logs"] as const;
 export type Page = (typeof pages)[number];
 
 export function isPage(s: string | null | undefined): s is Page {

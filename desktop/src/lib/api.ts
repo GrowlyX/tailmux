@@ -1,4 +1,4 @@
-// Mirrors of the daemon's JSON (internal/mux/http.go, stats.go).
+// Mirrors of the daemon's JSON (internal/mux/http.go, stats.go, exit.go).
 import { invoke } from "./bridge";
 
 export interface TailnetStatus {
@@ -30,6 +30,7 @@ export interface StatusResponse {
   tailnets: TailnetStatus[];
   tun?: { interface: string; fake_range: string; dns: boolean };
   update?: UpdateInfo;
+  exit_node?: ExitStatus;
 }
 
 export interface TailnetStats {
@@ -56,6 +57,48 @@ export interface PeerInfo {
   ips?: string[];
   online: boolean;
   routes?: string[];
+}
+
+/// Where a located exit node (Mullvad) is.
+export interface ExitLocation {
+  country?: string;
+  country_code?: string;
+  city?: string;
+  city_code?: string;
+  /// Ranks nodes in the same place; higher is better.
+  priority?: number;
+}
+
+/// The chosen exit node. `active` false means it can't be used right
+/// now (`error` says why) and non-tailnet traffic is blocked.
+export interface ExitStatus {
+  tailnet: string;
+  node: string;
+  name?: string;
+  fqdn?: string;
+  online: boolean;
+  active: boolean;
+  location?: ExitLocation;
+  error?: string;
+}
+
+/// One device offering itself as an exit node. The daemon sorts them:
+/// unlocated (your own) first, then by country, city and priority.
+export interface ExitNodeInfo {
+  tailnet: string;
+  id: string;
+  name: string;
+  fqdn: string;
+  ips?: string[];
+  online: boolean;
+  mullvad?: boolean;
+  location?: ExitLocation;
+  selected?: boolean;
+}
+
+export interface ExitNodesResponse {
+  current: ExitStatus | null;
+  nodes: ExitNodeInfo[] | null;
 }
 
 export interface ConfigView {

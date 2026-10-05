@@ -43,5 +43,13 @@
     <circle cx="11" cy="11" r="6.5" /><path d="m20 20-4.3-4.3" />
   {:else if name === "check"}
     <path d="m5 12 5 5L20 7" />
+  {:else if name === "globe"}
+    <circle cx="12" cy="12" r="9" /><path d="M3 12h18" /><path d="M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
+  {:else if name === "chevron-right"}
+    <path d="m9 5 7 7-7 7" />
+  {:else if name === "chevron-left"}
+    <path d="m15 5-7 7 7 7" />
+  {:else if name === "chevron-down"}
+    <path d="m5 9 7 7 7-7" />
   {/if}
 </svg>

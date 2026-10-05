@@ -5,8 +5,8 @@
   import Wordmark from "./Wordmark.svelte";
   import Icon from "./Icon.svelte";
 
-  const icons: Record<Page, string> = { overview: "gauge", tailnets: "grid", devices: "computer", settings: "gear", logs: "lines" };
-  const title = (p: Page) => p[0].toUpperCase() + p.slice(1);
+  const icons: Record<Page, string> = { overview: "gauge", tailnets: "grid", devices: "computer", "exit-node": "globe", settings: "gear", logs: "lines" };
+  const title = (p: Page) => (p[0].toUpperCase() + p.slice(1)).replace("-", " ");
 </script>
 
 <nav class="sidebar">

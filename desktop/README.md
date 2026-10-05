@@ -8,9 +8,11 @@ Svelte 5 frontend. It mirrors the macOS menu bar app in
   (in the order that draws the "T"); all dots dim when the daemon is down.
   Left click toggles the panel, right click opens a menu (Linux tray icons
   only have the menu, so it gets a "Show panel" entry).
-- **Panel**: throughput chart, one row per tailnet with a switch, an update
-  banner, and an offline state.
+- **Panel**: throughput chart, one row per tailnet with a switch, an exit
+  node row that opens a searchable picker, an update banner, and an offline
+  state.
 - **Main window**: Overview, Tailnets (add, remove, log in), Devices,
+  Exit node (your own exit nodes per tailnet, Mullvad by country and city),
   Settings (device name, TUN, auto-update, start at login, service install,
   files) and Logs.
 
@@ -50,7 +52,7 @@ TAILMUX_API=http://127.0.0.1:1056 pnpm tauri dev              # tray + hidden wi
 TAILMUX_API=http://127.0.0.1:1056 pnpm tauri dev -- -- --page settings   # main window open
 ```
 
-`--page <overview|tailnets|devices|settings|logs>` opens the main window on
+`--page <overview|tailnets|devices|exit-node|settings|logs>` opens the main window on
 that page at launch; otherwise only the tray icon shows.
 
 Useful checks: `pnpm check` (svelte-check), and
@@ -92,7 +94,7 @@ pnpm tauri build --bundles msi,nsis
 
 ## Screenshots
 
-`scripts/screenshot.mjs` captures the panel and all five pages, light and
+`scripts/screenshot.mjs` captures the panel and all six pages, light and
 dark, into `screenshots/`. It serves the built `dist/` from a tiny HTTP
 server whose `/api/` path proxies to the daemon (adding `X-Tailmux`), so the
 pages run unchanged in headless Chromium: `src/lib/bridge.ts` falls back to
