@@ -332,6 +332,7 @@ func (e *Engine) serveDNS(c *gonet.UDPConn) {
 
 // answerDNS gives every tailnet name a fake address. Names that don't
 // exist get NXDOMAIN, checked against the owning tailnet's own resolver.
+// With an exit node, other names get their real addresses.
 func (e *Engine) answerDNS(query []byte) []byte {
 	var p dnsmessage.Parser
 	h, err := p.Start(query)
@@ -371,6 +372,27 @@ func (e *Engine) answerDNS(query []byte) []byte {
 				answers = []netip.Addr{e.fake.For(name)}
 			}
 		}
+	} else if e.m.ExitNode() != nil {
+		// With an exit node the OS may send every name here ("~." on
+		// Linux, "." on Windows): answer with real addresses, looked up
+		// by the exit node's resolver.
+		rh.Authoritative = false
+		rh.RCode = dnsmessage.RCodeSuccess
+		if q.Type == dnsmessage.TypeA || q.Type == dnsmessage.TypeAAAA {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			tgt, err := e.m.Resolve(ctx, name)
+			cancel()
+			switch {
+			case err != nil && mux.IsNotFound(err):
+				rh.RCode = dnsmessage.RCodeNameError
+			case err != nil:
+				rh.RCode = dnsmessage.RCodeServerFailure
+			default:
+				answers = tgt.IPs
+			}
+		}
+		// Other types get an empty answer: not NXDOMAIN, which resolvers
+		// would apply to the name's A records too.
 	}
 	b := dnsmessage.NewBuilder(nil, rh)
 	b.EnableCompression()

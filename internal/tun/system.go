@@ -32,6 +32,9 @@ type osConfig interface {
 	dnsIntact(ifname string, domains, searchDomains []string) bool
 	// flushDNS drops cached answers (including cached failures).
 	flushDNS()
+	// setExit sends (or stops sending) everything into the TUN, for an
+	// exit node. tsnet's own traffic must keep using the real network.
+	setExit(ifname string, on bool) error
 	close(ifname string) error
 }
 
@@ -54,6 +57,7 @@ type System struct {
 	domains       []string
 	searchDomains []string
 	dnsActive     bool
+	exit          bool
 	skipped       map[netip.Prefix]bool
 	cancel        context.CancelFunc
 	done          chan struct{}
@@ -132,6 +136,7 @@ func (d *systemDevice) Close() error {
 	}
 	s.dev = nil
 	s.dnsActive = false
+	s.exit = false
 	s.domains = nil
 	s.searchDomains = nil
 	clear(s.routes)
@@ -385,6 +390,21 @@ func (s *System) reconcileLocked(force bool) {
 			s.routes[p] = true
 		}
 	}
+	// With an exit node everything goes into the TUN (routes no tailnet
+	// claims leave through the exit node), and so do all DNS lookups: "."
+	// asks the OS to send every name here, where supported.
+	exit := s.m.ExitNode() != nil
+	if force || exit != s.exit {
+		if err := s.os.setExit(ifname, exit); err != nil {
+			log.Printf("tun: exit node routes: %v", err)
+		} else if exit != s.exit {
+			log.Printf("tun: %s", map[bool]string{true: "routing all traffic through the exit node", false: "exit node off; routing tailnet traffic only"}[exit])
+		}
+		s.exit = exit
+	}
+	if exit {
+		domains = append(slices.Clone(domains), ".")
+	}
 	if s.cfg.TUN.NoDNS || (!force && slices.Equal(domains, s.domains) && slices.Equal(searchDomains, s.searchDomains)) {
 		return
 	}
@@ -411,27 +431,43 @@ func (s *System) Close() error {
 	return s.closeErr
 }
 
-func localPrefixes(skip string) []netip.Prefix {
-	ifs, _ := net.Interfaces()
-	var out []netip.Prefix
-	for _, ifc := range ifs {
-		if ifc.Name == skip || ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 || ifc.Flags&net.FlagPointToPoint != 0 {
-			continue
+func localPrefixes(skip string) []netip.Prefix { return mux.LocalPrefixes(skip) }
+
+// ExitActive reports whether all traffic is being routed into the TUN
+// for an exit node.
+func (s *System) ExitActive() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.exit
+}
+
+// exitRoutes cover everything, but as halves: they beat the default
+// route without replacing it, so the OS (and tsnet, which binds its
+// sockets to the default route's interface) still knows the real one,
+// and the LAN's more specific routes still win.
+var exitRoutes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/1"), netip.MustParsePrefix("128.0.0.0/1"),
+	netip.MustParsePrefix("::/1"), netip.MustParsePrefix("8000::/1"),
+}
+
+// setExitRoutes adds or removes exitRoutes with add/del. Only IPv4 errors
+// count: a TUN without IPv6 can't take the IPv6 halves.
+func setExitRoutes(on bool, add, del func(netip.Prefix) error) error {
+	var errs []error
+	for _, p := range exitRoutes {
+		f := del
+		if on {
+			f = add
 		}
-		addrs, _ := ifc.Addrs()
-		for _, a := range addrs {
-			if ipn, ok := a.(*net.IPNet); ok {
-				ip, _ := netip.AddrFromSlice(ipn.IP)
-				ones, _ := ipn.Mask.Size()
-				ip = ip.Unmap()
-				if ip.IsLinkLocalUnicast() {
-					continue
-				}
-				out = append(out, netip.PrefixFrom(ip, ones).Masked())
+		if err := f(p); err != nil && on {
+			if p.Addr().Is4() {
+				errs = append(errs, fmt.Errorf("%s: %w", p, err))
+			} else {
+				log.Printf("tun: exit node: no IPv6 route %s: %v", p, err)
 			}
 		}
 	}
-	return out
+	return errors.Join(errs...)
 }
 
 func overlapsAny(p netip.Prefix, list []netip.Prefix) bool {

@@ -296,6 +296,46 @@ func TestEngine(t *testing.T) {
 			t.Fatal("expected refusal for unallocated fake IP")
 		}
 	})
+
+	t.Run("exit node carries everything else", func(t *testing.T) {
+		delta := lab.NewTailnet(t, "delta")
+		delta.ExitNode(t, ctx, "exit")
+		if _, err := m.AddTailnet(mux.TailnetConfig{Name: "delta", ControlURL: delta.URL, Ephemeral: true}); err != nil {
+			t.Fatal(err)
+		}
+		defer m.RemoveTailnet("delta")
+		lab.Eventually(t, "delta's exit node", 90*time.Second, func() error {
+			_, err := m.SetExitNode(ctx, "delta", "exit")
+			return err
+		})
+		defer m.SetExitNode(ctx, "", "")
+		lab.Eventually(t, "8.8.8.8 through the exit node", 60*time.Second, func() error {
+			c, err := dialTCP(netip.MustParseAddr("8.8.8.8"), 80)
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			c.SetDeadline(time.Now().Add(10 * time.Second))
+			got, _ := bufio.NewReader(c).ReadString('\n')
+			if want := "delta exit 8.8.8.8:80"; strings.TrimSpace(got) != want {
+				return fmt.Errorf("got %q, want %q", got, want)
+			}
+			return nil
+		})
+		if got := line(netip.MustParseAddr("198.51.100.3"), 22); got != "alpha gw 198.51.100.3:22" {
+			t.Errorf("subnet route: got %q", got)
+		}
+		// Public names resolve through the exit node (which here uses this
+		// host's resolver, so it needs the internet).
+		if _, err := net.DefaultResolver.LookupNetIP(ctx, "ip4", "example.com"); err == nil {
+			if ip, rc := lookup("example.com."); rc != dnsmessage.RCodeSuccess || !ip.IsValid() || fake.Prefix().Contains(ip) {
+				t.Errorf("example.com: %v %v, want a real address", ip, rc)
+			}
+		}
+		if ip, rc := lookup("web.bravo."); rc != dnsmessage.RCodeSuccess || !fake.Prefix().Contains(ip) {
+			t.Errorf("web.bravo: %v %v, want a fake address", ip, rc)
+		}
+	})
 }
 
 func TestFakeIPs(t *testing.T) {

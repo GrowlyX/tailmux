@@ -58,6 +58,7 @@ Consider turning off key expiry for it in the admin console.
 | `http` | `127.0.0.1:1056` | HTTP proxy, PAC file and the [local API](menubar.md#api) |
 | `dns` | off | Optional DNS server, e.g. `127.0.0.1:1053` |
 | `direct` | `true` | Proxy traffic no tailnet claims goes out normally |
+| `exit_node` | none | `{"tailnet": "home", "node": "nas"}`: send that traffic through an [exit node](exit-nodes.md) instead |
 | `state_dir` | see [install](install.md) | Logins and fake-IP table |
 | `tun.enabled` | `false` | [TUN mode](tun.md) |
 | `tun.peer_routes` | `true` | Route each tailnet device's address, for DNS names that point at one |
