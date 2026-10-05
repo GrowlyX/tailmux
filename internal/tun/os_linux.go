@@ -56,10 +56,18 @@ const (
 )
 
 func (l linuxOS) setExit(ifname string, on bool) error {
-	l.clearExit()
 	if !on {
+		l.clearExit()
 		return nil
 	}
+	if l.exitRulesPresent() {
+		// Re-applying (after a network change): replace the route in place
+		// rather than dropping the rules, which would let traffic out
+		// directly for a moment.
+		run("ip", "-6", "route", "replace", "default", "dev", ifname, "table", exitTable)
+		return run("ip", "-4", "route", "replace", "default", "dev", ifname, "table", exitTable)
+	}
+	l.clearExit()
 	var errs []error
 	for _, fam := range []string{"-4", "-6"} {
 		err := errors.Join(
@@ -81,6 +89,17 @@ func (l linuxOS) setExit(ifname string, on bool) error {
 		log.Printf("tun: exit node: strict reverse path filtering (net.ipv4.conf.all.rp_filter=1) can drop replies; set it to 2")
 	}
 	return nil
+}
+
+// exitRulesPresent reports whether both IPv4 rules are in place.
+func (linuxOS) exitRulesPresent() bool {
+	for _, pref := range []string{prefMainNoDflt, prefExit} {
+		out, err := exec.Command("ip", "-4", "rule", "show", "pref", pref).Output()
+		if err != nil || len(strings.TrimSpace(string(out))) == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func (linuxOS) clearExit() {

@@ -18,6 +18,7 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 
 	"github.com/GrowlyX/tailmux/internal/lab"
+	"github.com/GrowlyX/tailmux/internal/mux"
 )
 
 // TestSystem drives a real TUN device through the OS network stack: no
@@ -233,6 +234,50 @@ func TestSystem(t *testing.T) {
 		expect(t, "http://web.bravo/", "bravo web", func() (string, error) { return get("http://web.bravo/") })
 		expect(t, "http://web.charlie.example.ts.net/", "charlie web", func() (string, error) { return get("http://web.charlie.example.ts.net/") })
 		expect(t, "db.corp.internal:5432", "charlie gw 203.0.113.200:5432", func() (string, error) { return readLine("db.corp.internal:5432") })
+	})
+
+	// Routes all of the machine's traffic into the TUN for a while, which
+	// would cut a CI runner off from its own service; opt in.
+	t.Run("exit node over the kernel", func(t *testing.T) {
+		if os.Getenv("TAILMUX_TUN_E2E_EXIT") == "" {
+			t.Skip("set TAILMUX_TUN_E2E_EXIT=1 too: it routes everything into the TUN")
+		}
+		delta := lab.NewTailnet(t, "delta")
+		delta.ExitNode(t, ctx, "exit")
+		if _, err := m.AddTailnet(mux.TailnetConfig{Name: "delta", ControlURL: delta.URL, Ephemeral: true}); err != nil {
+			t.Fatal(err)
+		}
+		defer m.RemoveTailnet("delta")
+		lab.Eventually(t, "select delta's exit node", 90*time.Second, func() error {
+			_, err := m.SetExitNode(ctx, "delta", "exit")
+			return err
+		})
+		if !sys.ExitActive() {
+			t.Fatal("exit routes not applied")
+		}
+		// A plain dial to "the internet", routed by the kernel.
+		expect(t, "1.2.3.4:80", "delta exit 1.2.3.4:80", func() (string, error) { return readLine("1.2.3.4:80") })
+		expect(t, "198.51.100.3:22", "alpha gw 198.51.100.3:22", func() (string, error) { return readLine("198.51.100.3:22") })
+		if runtime.GOOS == "linux" {
+			out, _ := exec.Command("ip", "rule", "show").CombinedOutput()
+			if !strings.Contains(string(out), "5290:") || !strings.Contains(string(out), "suppress_prefixlength 0") {
+				t.Errorf("policy rules missing:\n%s", out)
+			}
+		}
+		sys.Repair("test") // re-applying keeps it working
+		expect(t, "1.2.3.4:80 after repair", "delta exit 1.2.3.4:80", func() (string, error) { return readLine("1.2.3.4:80") })
+
+		if _, err := m.SetExitNode(ctx, "", ""); err != nil {
+			t.Fatal(err)
+		}
+		if sys.ExitActive() {
+			t.Fatal("exit routes still applied")
+		}
+		if runtime.GOOS == "linux" {
+			if out, _ := exec.Command("ip", "rule", "show").CombinedOutput(); strings.Contains(string(out), "5290:") {
+				t.Errorf("policy rules left behind:\n%s", out)
+			}
+		}
 	})
 
 	t.Run("cleanup", func(t *testing.T) {
