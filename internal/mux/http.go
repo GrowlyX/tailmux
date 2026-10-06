@@ -34,6 +34,7 @@ func (m *Mux) HTTPHandler(socksAddr string) http.Handler {
 	api.HandleFunc("GET /logs", m.serveLogs)
 	api.HandleFunc("POST /tailnets/{name}/{action}", m.serveToggle)
 	api.HandleFunc("GET /exit-nodes", m.serveExitNodes)
+	api.HandleFunc("GET /lock", m.serveLock)
 	api.HandleFunc("PUT /exit-node", m.serveSetExitNode)
 	api.HandleFunc("GET /proxy.pac", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-ns-proxy-autoconfig")

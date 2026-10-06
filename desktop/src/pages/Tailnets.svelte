@@ -1,7 +1,7 @@
 <script lang="ts">
   import { store } from "../lib/store.svelte";
   import { manager } from "../lib/manager.svelte";
-  import { running } from "../lib/api";
+  import { needsSignature, running } from "../lib/api";
   import { color, formatBytes, stateWord } from "../lib/format";
   import PageHeader from "../ui/PageHeader.svelte";
   import PillSwitch from "../ui/PillSwitch.svelte";
@@ -29,7 +29,7 @@
     manager.error = null;
   }
   function stateColor(t: (typeof store.tailnets)[number]) {
-    if (t.auth_url && t.enabled) return "var(--orange)";
+    if ((t.auth_url || needsSignature(t)) && t.enabled) return "var(--orange)";
     return running(t) ? "var(--green)" : "var(--fg-2)";
   }
 </script>
@@ -82,6 +82,15 @@
             </div>
           {/each}
         </div>
+        {#if needsSignature(t) && t.lock?.sign_command}
+          <div class="lock">
+            <div class="lock-note">This tailnet uses Tailnet Lock, and its devices ignore this one until it's signed. Run this on a signing device:</div>
+            <div class="lock-cmd">
+              <span class="mono selectable">{t.lock.sign_command}</span>
+              <button class="btn" onclick={() => manager.copy(t.lock!.sign_command!)}>Copy</button>
+            </div>
+          </div>
+        {/if}
         {#if t.routes?.length}
           <div class="routes mono secondary">{t.routes.join("   ")}</div>
         {/if}
@@ -138,6 +147,10 @@
   .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
   .name { font-size: 15px; font-weight: 600; }
   .state { font-size: 12px; }
+  .lock { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+  .lock-note { font-size: 12px; color: var(--orange); }
+  .lock-cmd { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+  .lock-cmd span { flex: 1; word-break: break-all; }
   .spacer { flex: 1; }
   .menu-wrap { position: relative; display: flex; }
   .more { border: none; background: none; padding: 2px; color: var(--fg-2); display: flex; border-radius: 6px; }

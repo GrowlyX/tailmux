@@ -282,6 +282,17 @@ struct TailnetCard: View {
                     Detail(label: "Transferred", value: formatBytes(Double(s.rxTotal + s.txTotal)))
                 }
             }
+            if tailnet.needsSignature, let cmd = tailnet.lock?.signCommand {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("This tailnet uses Tailnet Lock, and its devices ignore this one until it's signed. Run this on a signing device:")
+                        .font(.system(size: 12)).foregroundStyle(.orange)
+                    HStack(spacing: 8) {
+                        Text(cmd).font(.system(size: 11, design: .monospaced)).textSelection(.enabled).lineLimit(2)
+                        Spacer()
+                        Button("Copy") { manager.copy(cmd) }
+                    }
+                }
+            }
             if let routes = tailnet.routes, !routes.isEmpty {
                 Text(routes.joined(separator: "   "))
                     .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
@@ -295,6 +306,7 @@ struct TailnetCard: View {
     private var state: String {
         if !tailnet.enabled { return "Off" }
         if let u = tailnet.authUrl, !u.isEmpty { return "Needs login" }
+        if tailnet.needsSignature { return "Needs signing" }
         switch tailnet.state {
         case "Running": return "Connected"
         case "Starting", "NoState", nil, "": return "Connecting…"
@@ -304,6 +316,7 @@ struct TailnetCard: View {
 
     private var stateColor: Color {
         if let u = tailnet.authUrl, !u.isEmpty, tailnet.enabled { return .orange }
+        if tailnet.needsSignature, tailnet.enabled { return .orange }
         return tailnet.running ? .green : .secondary
     }
 }

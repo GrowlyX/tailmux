@@ -18,13 +18,17 @@ import (
 	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
+	"tailscale.com/client/local"
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/store/mem"
 	"tailscale.com/tailcfg"
+	"tailscale.com/tailcfg/nodecap"
+	"tailscale.com/tka"
 	"tailscale.com/tsnet"
 	"tailscale.com/tstest/integration"
 	"tailscale.com/tstest/integration/testcontrol"
 	"tailscale.com/types/dnstype"
+	"tailscale.com/types/key"
 	"tailscale.com/types/logger"
 )
 
@@ -35,6 +39,8 @@ type Tailnet struct {
 	Domain  string
 	Control *testcontrol.Server
 	URL     string
+
+	signer *local.Client // set by Lock
 }
 
 func NewTailnet(t *testing.T, name string) *Tailnet {
@@ -124,6 +130,57 @@ func (f *Tailnet) ExitNode(t *testing.T, ctx context.Context, host string) {
 	}
 	st, _ := lc.Status(ctx)
 	f.Control.SetSubnetRoutes(st.Self.PublicKey, exit)
+}
+
+// AllowLock lets this tailnet's nodes turn on Tailnet Lock. Call it
+// before any node joins.
+func (f *Tailnet) AllowLock() {
+	f.Control.DefaultNodeCapabilities = &tailcfg.NodeCapMap{nodecap.TailnetLock: nil}
+}
+
+// Lock turns on Tailnet Lock with a new "signer" node holding the only
+// trusted key. Nodes already in the tailnet are signed; later ones stay
+// locked out until Sign.
+func (f *Tailnet) Lock(t *testing.T, ctx context.Context) {
+	s, _ := f.Node(t, ctx, "signer")
+	lc, _ := s.LocalClient()
+	st, err := lc.TailnetLockStatus(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := []tka.Key{{Kind: tka.Key25519, Public: st.PublicKey.Verifier(), Votes: 2}}
+	secret := bytes.Repeat([]byte{0xa5}, 32)
+	if _, err := lc.TailnetLockInit(ctx, keys, [][]byte{tka.DisablementKDF(secret)}, nil); err != nil {
+		t.Fatalf("%s: lock init: %v", f.Name, err)
+	}
+	f.signer = lc
+	f.wake()
+}
+
+// Sign does what `tailscale lock sign <nodekey> <tlpub>` does on the
+// signer node.
+func (f *Tailnet) Sign(ctx context.Context, nodeKey, tlpub string) error {
+	var nk key.NodePublic
+	var rot key.NLPublic
+	if err := nk.UnmarshalText([]byte(nodeKey)); err != nil {
+		return err
+	}
+	if err := rot.UnmarshalText([]byte(tlpub)); err != nil {
+		return err
+	}
+	if err := f.signer.TailnetLockSign(ctx, nk, []byte(rot.Verifier())); err != nil {
+		return err
+	}
+	f.wake()
+	return nil
+}
+
+// wake re-sends every node its netmap: testcontrol stores new signatures
+// without pushing them.
+func (f *Tailnet) wake() {
+	for _, n := range f.Control.AllNodes() {
+		f.Control.UpdateNode(n)
+	}
 }
 
 // splitDNS runs a resolver node answering *.<zone> with answer, and

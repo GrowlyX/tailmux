@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { TailnetStatus } from "../lib/api";
-  import { running } from "../lib/api";
+  import { needsSignature, running } from "../lib/api";
   import { color as paletteColor, detail, formatBytes, formatRate } from "../lib/format";
   import { store } from "../lib/store.svelte";
   import { invoke } from "../lib/bridge";
@@ -12,10 +12,13 @@
   let isRunning = $derived(running(tailnet));
   let series = $derived(store.series(tailnet.name).slice(-40));
   let rate = $derived.by(() => { const r = store.rate(tailnet.name); return r.rx + r.tx; });
-  let needsLogin = $derived(Boolean(tailnet.auth_url) && tailnet.enabled);
+  let needsLogin = $derived((Boolean(tailnet.auth_url) || needsSignature(tailnet)) && tailnet.enabled);
 
   let help = $derived.by(() => {
     const lines = [tailnet.name + (tailnet.suffix ? ` (${tailnet.suffix})` : "")];
+    if (needsSignature(tailnet) && tailnet.lock?.sign_command) {
+      lines.push("This tailnet uses Tailnet Lock. Its devices ignore this one until a signing device runs:", tailnet.lock.sign_command);
+    }
     if (tailnet.self_ips?.length) lines.push("this device: " + tailnet.self_ips.join(", "));
     lines.push(...(tailnet.routes ?? []));
     const s = store.stats[tailnet.name];
@@ -25,6 +28,7 @@
 
   function click() {
     if (tailnet.auth_url) void invoke("open_url", { url: tailnet.auth_url });
+    else if (needsSignature(tailnet) && tailnet.lock?.sign_command) void invoke("copy_text", { text: tailnet.lock.sign_command });
   }
 </script>
 

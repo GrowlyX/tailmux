@@ -1,4 +1,4 @@
-import type { TailnetStatus } from "./api";
+import { needsSignature, type TailnetStatus } from "./api";
 
 // Store.swift's Palette, in order.
 export const palette = [
@@ -41,6 +41,7 @@ export function needsLogin(t: TailnetStatus): boolean {
 export function detail(t: TailnetStatus): string {
   if (!t.enabled) return "Off";
   if (t.auth_url) return "Needs login · click to sign in";
+  if (needsSignature(t)) return "Needs signing · click to copy command";
   switch (t.state) {
     case "Running": {
       let s = `${t.online}/${t.peers} online`;
@@ -62,6 +63,7 @@ export function detail(t: TailnetStatus): string {
 export function stateWord(t: TailnetStatus): string {
   if (!t.enabled) return "Off";
   if (t.auth_url) return "Needs login";
+  if (needsSignature(t)) return "Needs signing";
   switch (t.state) {
     case "Running":
       return "Connected";

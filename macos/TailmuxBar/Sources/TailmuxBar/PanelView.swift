@@ -171,7 +171,12 @@ struct TailnetRow: View {
         .contentShape(Rectangle())
         .onHover { hover.on = $0 }
         .onTapGesture {
-            if let u = tailnet.authUrl, !u.isEmpty, let url = URL(string: u) { NSWorkspace.shared.open(url) }
+            if let u = tailnet.authUrl, !u.isEmpty, let url = URL(string: u) {
+                NSWorkspace.shared.open(url)
+            } else if tailnet.needsSignature, let cmd = tailnet.lock?.signCommand {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(cmd, forType: .string)
+            }
         }
         .help(help)
     }
@@ -181,6 +186,7 @@ struct TailnetRow: View {
     private var detail: String {
         if !tailnet.enabled { return "Off" }
         if let u = tailnet.authUrl, !u.isEmpty { return "Needs login · click to sign in" }
+        if tailnet.needsSignature { return "Needs signing · click to copy command" }
         switch tailnet.state {
         case "Running":
             var s = "\(tailnet.online)/\(tailnet.peers) online"
@@ -194,11 +200,16 @@ struct TailnetRow: View {
 
     private var detailColor: Color {
         if let u = tailnet.authUrl, !u.isEmpty, tailnet.enabled { return .orange }
+        if tailnet.needsSignature, tailnet.enabled { return .orange }
         return .secondary
     }
 
     private var help: String {
         var lines = [tailnet.name + (tailnet.suffix.map { " (\($0))" } ?? "")]
+        if tailnet.needsSignature, let cmd = tailnet.lock?.signCommand {
+            lines.append("This tailnet uses Tailnet Lock. Its devices ignore this one until a signing device runs:")
+            lines.append(cmd)
+        }
         if let ips = tailnet.selfIps, !ips.isEmpty { lines.append("this device: " + ips.joined(separator: ", ")) }
         lines += tailnet.routes ?? []
         if let s = store.stats[tailnet.name] {
