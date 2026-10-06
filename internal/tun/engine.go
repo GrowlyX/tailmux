@@ -103,15 +103,17 @@ func (e *Engine) close() {
 
 func (e *Engine) fromDevice() error {
 	n := e.dev.BatchSize()
-	bufs := make([][]byte, n)
-	for i := range bufs {
-		bufs[i] = make([]byte, offset+65535)
-	}
-	sizes := make([]int, n)
+	// One slab for the whole batch; the device spaces packets out in it.
+	slab := make([]byte, n*(65535+wgtun.ReadPacketSpacing)+wgtun.ReadPacketSpacing)
+	packets := make([]wgtun.ReadPacket, n)
 	var lim logLimiter
 	var backoff time.Duration
 	for {
-		count, err := e.dev.Read(bufs, sizes, offset)
+		count, err := e.dev.Read(slab, packets)
+		// Packets read before an error are still valid.
+		for _, p := range packets[:count] {
+			e.inject(slab[p.Offset : p.Offset+p.Size])
+		}
 		if err != nil {
 			if errors.Is(err, wgtun.ErrTooManySegments) {
 				continue
@@ -129,29 +131,31 @@ func (e *Engine) fromDevice() error {
 			continue
 		}
 		backoff = 0
-		for i := range count {
-			pkt := bufs[i][offset : offset+sizes[i]]
-			if len(pkt) == 0 {
-				continue
-			}
-			if isEcho4(pkt) {
-				go e.handlePing(append([]byte(nil), pkt...))
-				continue
-			}
-			var proto tcpip.NetworkProtocolNumber
-			switch pkt[0] >> 4 {
-			case 4:
-				proto = header.IPv4ProtocolNumber
-			case 6:
-				proto = header.IPv6ProtocolNumber
-			default:
-				continue
-			}
-			pb := stack.NewPacketBuffer(stack.PacketBufferOptions{Payload: buffer.MakeWithData(pkt)})
-			e.ep.InjectInbound(proto, pb)
-			pb.DecRef()
-		}
 	}
+}
+
+// inject hands one packet from the device to the stack (or answers a
+// ping itself).
+func (e *Engine) inject(pkt []byte) {
+	if len(pkt) == 0 {
+		return
+	}
+	if isEcho4(pkt) {
+		go e.handlePing(append([]byte(nil), pkt...))
+		return
+	}
+	var proto tcpip.NetworkProtocolNumber
+	switch pkt[0] >> 4 {
+	case 4:
+		proto = header.IPv4ProtocolNumber
+	case 6:
+		proto = header.IPv6ProtocolNumber
+	default:
+		return
+	}
+	pb := stack.NewPacketBuffer(stack.PacketBufferOptions{Payload: buffer.MakeWithData(pkt)})
+	e.ep.InjectInbound(proto, pb)
+	pb.DecRef()
 }
 
 func (e *Engine) toDevice(ctx context.Context) error {
