@@ -3,7 +3,9 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func fakeApp(t *testing.T, dir, id, version string) string {
@@ -122,5 +124,30 @@ func TestSyncApplicationsAppConcurrent(t *testing.T) {
 	}
 	if m, _ := filepath.Glob(filepath.Join(applicationsDir, ".tailmux-*")); len(m) > 0 {
 		t.Fatalf("left behind: %v", m)
+	}
+}
+
+func TestSyncApplicationsAppLockHeld(t *testing.T) {
+	src := fakeApp(t, filepath.Join(t.TempDir(), "Cellar", "tailmux", "1.1.0"), appBundleID, "1.1.0")
+	applicationsDir = t.TempDir()
+	appSource = func() string { return src }
+	appLockWait = 300 * time.Millisecond
+	t.Cleanup(func() { applicationsDir, appSource, appLockWait = "/Applications", bundledApp, 10*time.Second })
+
+	// Someone else holding a lock on the folder doesn't hang us.
+	dir, err := os.Open(applicationsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dir.Close()
+	if err := syscall.Flock(int(dir.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if _, wrote, err := syncApplicationsApp(true); err == nil || wrote {
+		t.Fatalf("lock held: wrote %v, err %v", wrote, err)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("waited %v", d)
 	}
 }

@@ -227,12 +227,14 @@ func up(ctx context.Context, cfg *mux.Config, cfgPath string, verbose bool) erro
 
 	log.SetOutput(io.MultiWriter(os.Stderr, mux.Logs))
 	// After an upgrade, bring the /Applications copy of the menu bar app
-	// along before the app notices the new version and relaunches.
-	if path, wrote, err := syncApplicationsApp(false); err != nil {
-		log.Printf("menu bar app: %v", err)
-	} else if wrote {
-		log.Printf("menu bar app: updated %s", path)
-	}
+	// along. In the background: it can wait on a lock any user can hold.
+	go func() {
+		if path, wrote, err := syncApplicationsApp(false); err != nil {
+			log.Printf("menu bar app: %v", err)
+		} else if wrote {
+			log.Printf("menu bar app: updated %s", path)
+		}
+	}()
 	m := mux.New(cfg, mux.Options{Verbose: verbose})
 	m.ConfigPath = cfgPath
 	defer m.Close()

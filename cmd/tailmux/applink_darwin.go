@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // Homebrew builds TailmuxBar.app into the formula's prefix, where Finder,
@@ -27,6 +28,7 @@ const (
 var (
 	applicationsDir = "/Applications"
 	appSource       = bundledApp
+	appLockWait     = 10 * time.Second
 )
 
 // bundledApp is the TailmuxBar.app installed next to this binary
@@ -58,13 +60,21 @@ func syncApplicationsApp(create bool) (string, bool, error) {
 	}
 	// `tailmux bar`, `tailmux setup` and the daemon can all get here at
 	// once; hold a lock on the folder itself from the check to the swap.
+	// Any user can lock /Applications, so don't wait on it for long.
 	dir, err := os.Open(applicationsDir)
 	if err != nil {
 		return "", false, err
 	}
 	defer dir.Close()
-	if err := syscall.Flock(int(dir.Fd()), syscall.LOCK_EX); err != nil {
-		return "", false, err
+	for deadline := time.Now().Add(appLockWait); ; {
+		err := syscall.Flock(int(dir.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			break
+		}
+		if err != syscall.EWOULDBLOCK || time.Now().After(deadline) {
+			return "", false, fmt.Errorf("lock %s: %w", applicationsDir, err)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 	dst := filepath.Join(applicationsDir, appName)
 	fi, err := os.Lstat(dst)
