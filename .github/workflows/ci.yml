@@ -310,6 +310,36 @@ jobs:
           [System.Drawing.Graphics]::FromImage($img).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
           $img.Save("$PWD/shots/native-windows.png")
           Stop-Process -Name tailmux-desktop -ErrorAction SilentlyContinue
+      # Uninstalling the app must take the service with it, or it keeps
+      # holding TUN and DNS with nothing left to stop it.
+      - name: uninstalling the app removes the service
+        env:
+          MSYS_NO_PATHCONV: 1 # keep /i, /x and /S as switches
+        run: |
+          gone() {
+            if [ "$RUNNER_OS" = Windows ]; then ! sc.exe query tailmux > /dev/null; else [ ! -f /etc/systemd/system/tailmux.service ] && ! systemctl is-active -q tailmux; fi \
+              || { echo "service left behind by $1"; exit 1; }
+            echo "$1: service removed"
+          }
+          bundle=desktop/src-tauri/target/release/bundle
+          if [ "$RUNNER_OS" = Windows ]; then
+            msi=$(cygpath -w "$(ls $bundle/msi/*.msi)")
+            msiexec /i "$msi" /qn /norestart
+            "$(cygpath -u "$PROGRAMFILES")/tailmux/tailmux.exe" service install
+            msiexec /x "$msi" /qn /norestart
+            gone msi
+            $bundle/nsis/*.exe /S
+            dir="$(cygpath -u "$LOCALAPPDATA")/tailmux"
+            "$dir/tailmux.exe" service install
+            "$dir/uninstall.exe" /S "_?=$(cygpath -w "$dir")"
+            gone nsis
+          else
+            deb=$(ls $bundle/deb/*.deb)
+            sudo apt-get install -y "./$deb"
+            sudo /usr/bin/tailmux service install
+            sudo apt-get remove -y "$(dpkg-deb -f "$deb" Package)"
+            gone deb
+          fi
       - uses: actions/upload-artifact@v7
         if: always()
         with:

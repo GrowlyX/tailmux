@@ -169,6 +169,17 @@ sudo chmod +x /etc/sv/tailmux/run && sudo ln -s /etc/sv/tailmux /var/service/
 
 Use `/usr/local/bin/tailmux` if you built it with `make install`.
 
+## Uninstalling
+
+Uninstalling the app on Windows, or removing a `.deb` or `.rpm` (the desktop
+app or `tailmux-cli`), also removes the service it installed (Windows asks
+for Administrator once more). The config and state are kept. To remove the
+service by hand, or after using the `.AppImage` or a source build:
+
+```sh
+sudo tailmux service uninstall   # Windows: tailmux service uninstall, as Administrator
+```
+
 ## Without an installer
 
 ```sh

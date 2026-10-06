@@ -38,7 +38,8 @@
         ],
         "conflicts": [
           "tailmux-cli"
-        ]
+        ],
+        "preRemoveScript": "linux/prerm.sh"
       },
       "rpm": {
         "depends": [
@@ -46,12 +47,22 @@
         ],
         "conflicts": [
           "tailmux-cli"
-        ]
+        ],
+        "preRemoveScript": "linux/prerm.sh"
       }
     },
     "windows": {
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "installerHooks": "windows/hooks.nsh"
+      },
+      "wix": {
+        "fragmentPaths": [
+          "windows/service.wxs"
+        ],
+        "componentGroupRefs": [
+          "TailmuxService"
+        ]
       }
     }
   },
