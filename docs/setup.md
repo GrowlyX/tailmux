@@ -29,6 +29,33 @@ A terminal UI for everything in the config:
 Each tailnet sees this machine as a new device, `tailmux-<hostname>`.
 Consider turning off key expiry for it in the admin console.
 
+## Tailnet Lock
+
+On a tailnet with [Tailnet Lock](https://tailscale.com/kb/1226/tailnet-lock),
+a new device only becomes reachable once a trusted ("signing") device signs
+it. tailmux's device is no exception. Until it's signed, it's logged in but
+the tailnet's other devices ignore it, so tailmux claims none of that
+tailnet's names or routes, and shows it as **Needs signing**:
+
+```sh
+tailmux lock          # every tailnet: off, signed, or the command that signs this device
+tailmux status        # also prints the command for any tailnet that needs it
+```
+
+On a signing device, run the command it prints:
+
+```sh
+tailscale lock sign nodekey:… tlpub:…
+```
+
+The tailnet comes up within a few seconds. The menu bar and desktop apps
+show the same command with a **Copy** button; clicking the tailnet in the
+panel copies it too.
+
+To skip the signing step, give the tailnet a pre-signed auth key. Create an
+auth key in the admin console, run `tailscale lock sign tskey-auth-…` on a
+signing device, and use what it prints as that tailnet's `auth_key`.
+
 ## The config file
 
 `tailmux setup` writes this for you. It's plain JSON if you'd rather edit it by hand:

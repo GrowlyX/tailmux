@@ -53,6 +53,7 @@ usage:
   tailmux exit-node use <node> send everything else through it: a name,
                                name.tailnet, IP, or a place ("se", "Tokyo")
   tailmux exit-node off        go direct again
+  tailmux lock [tailnet]       Tailnet Lock: is this device signed, and how to sign it
   tailmux nc <host> <port>     pipe stdio to host:port (ssh ProxyCommand)
   tailmux service install      run tailmux as a system service (Linux, Windows; needs root/admin)
   tailmux service uninstall|status
@@ -138,6 +139,8 @@ func main() {
 		err = peers(cfg, fs.Arg(0))
 	case "exit-node", "exit":
 		err = exitNode(cfg, fs.Args())
+	case "lock":
+		err = lockStatus(cfg, fs.Arg(0))
 	case "resolve":
 		if fs.NArg() != 1 {
 			fs.Usage()
@@ -335,6 +338,9 @@ func status(cfg *mux.Config) error {
 		if t.AuthURL != "" {
 			fmt.Printf("\n%s needs login: %s\n", t.Name, t.AuthURL)
 		}
+		if l := t.Lock; l != nil && !l.Signed {
+			fmt.Printf("\n%s uses Tailnet Lock and this device isn't signed yet; on a signing device run:\n  %s\n", t.Name, l.SignCommand)
+		}
 		if len(t.Routes) > 0 || len(t.SplitDNS) > 0 {
 			fmt.Printf("\n%s:\n", t.Name)
 			for _, r := range t.Routes {
@@ -420,6 +426,27 @@ func peers(cfg *mux.Config, only string) error {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", p.Alias, addr, st, strings.Join(p.Routes, " "))
 	}
 	return tw.Flush()
+}
+
+func lockStatus(cfg *mux.Config, only string) error {
+	var ls []mux.LockInfo
+	if err := apiGet(cfg, "/lock", &ls); err != nil {
+		return err
+	}
+	for _, l := range ls {
+		if only != "" && l.Tailnet != only {
+			continue
+		}
+		switch k := l.Lock; {
+		case k == nil:
+			fmt.Printf("%s: Tailnet Lock is off\n", l.Tailnet)
+		case k.Signed:
+			fmt.Printf("%s: Tailnet Lock is on; this device is signed (%d trusted keys)\n  node key  %s\n  lock key  %s\n", l.Tailnet, k.TrustedKeys, k.NodeKey, k.PublicKey)
+		default:
+			fmt.Printf("%s: Tailnet Lock is on and this device is NOT signed, so the tailnet's devices ignore it.\n  On a signing device run:\n    %s\n", l.Tailnet, k.SignCommand)
+		}
+	}
+	return nil
 }
 
 func resolve(cfg *mux.Config, host string) error {

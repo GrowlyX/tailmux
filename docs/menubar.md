@@ -43,6 +43,7 @@ The app uses the daemon's local HTTP API (the `http` address, default `127.0.0.1
 | `GET /resolve?host=` | Routing decision for one destination |
 | `GET /proxy.pac` | The PAC file |
 | `GET /peers` | Every device in every tailnet |
+| `GET /lock` | `[{"tailnet", "lock"}]`: Tailnet Lock per tailnet (`enabled`, `signed`, `node_key`, `public_key`, `sign_command`); `lock` is null when it's off. `/status` carries the same per tailnet |
 | `GET /exit-nodes` | `{"current", "nodes"}`: the exit node in use, and every device offering itself as one (own first, then by country, city and priority) |
 | `PUT /exit-node` | Body `{"tailnet": "home", "node": "<fqdn or id>"}` picks one, `{}` turns it off; applies live. Requires `X-Tailmux` |
 | `POST /update` | Install the latest release now; progress shows in `/status` |

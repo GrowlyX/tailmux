@@ -32,8 +32,21 @@ struct TailnetStatus: Decodable, Identifiable {
     var online: Int
     var routes: [String]?
     var error: String?
+    var lock: LockStatus?
 
-    var running: Bool { enabled && state == "Running" }
+    /// Tailnet Lock is on and nobody has signed this device yet: it's
+    /// logged in, but the tailnet's devices ignore it.
+    var needsSignature: Bool { lock.map { $0.enabled && !$0.signed } ?? false }
+    var running: Bool { enabled && state == "Running" && !needsSignature }
+}
+
+struct LockStatus: Decodable {
+    var enabled: Bool
+    var signed: Bool
+    var nodeKey: String?
+    var publicKey: String?
+    var signCommand: String?
+    var trustedKeys: Int?
 }
 
 struct TUNInfo: Decodable {

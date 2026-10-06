@@ -12,6 +12,23 @@ export interface TailnetStatus {
   online: number;
   routes?: string[];
   error?: string;
+  lock?: LockStatus;
+}
+
+/// Tailnet Lock, as this device sees it (internal/mux/lock.go).
+export interface LockStatus {
+  enabled: boolean;
+  signed: boolean;
+  node_key?: string;
+  public_key?: string;
+  sign_command?: string;
+  trusted_keys?: number;
+}
+
+/// Tailnet Lock is on and nobody has signed this device yet: it's logged
+/// in, but the tailnet's devices ignore it.
+export function needsSignature(t: TailnetStatus): boolean {
+  return Boolean(t.lock?.enabled && !t.lock.signed);
 }
 
 export interface UpdateInfo {
@@ -113,7 +130,7 @@ export interface ConfigView {
 }
 
 export function running(t: TailnetStatus): boolean {
-  return t.enabled && t.state === "Running";
+  return t.enabled && t.state === "Running" && !needsSignature(t);
 }
 
 export function get<T>(path: string): Promise<T> {

@@ -47,6 +47,8 @@ type Tailnet struct {
 	// split-DNS domain -> resolver addresses, for names we resolve ourselves
 	splitRes map[string][]netip.AddrPort
 
+	lock *LockStatus // nil until known, or when Tailnet Lock is off
+
 	exitWant string               // exit node to use, as configured; "" for none
 	exitID   tailcfg.StableNodeID // exit node the node is set to use
 	exitErr  string               // why exitWant isn't in use
@@ -158,6 +160,23 @@ func (t *Tailnet) refresh(ctx context.Context) {
 		return
 	}
 	snap := Snapshot{Name: t.cfg.Name, Priority: t.priority, Running: st.BackendState == ipn.Running.String() && t.Enabled()}
+	// With Tailnet Lock on, a device nobody has signed yet is logged in
+	// and "Running", but every other device drops its traffic. Don't claim
+	// anything for it until it's signed.
+	var lock *LockStatus
+	if st.BackendState == ipn.Running.String() {
+		var err error
+		if lock, err = t.lockStatus(ctx); err != nil {
+			// Keep what we knew: a slow read mustn't hand an unsigned
+			// device its routes back.
+			t.mu.Lock()
+			lock = t.lock
+			t.mu.Unlock()
+		}
+		if lock.needsSignature() {
+			snap.Running = false
+		}
+	}
 	// Starting after having been Running is a reconnect (sleep, network
 	// change), not a logout: keep claiming.
 	t.mu.Lock()
@@ -227,6 +246,10 @@ func (t *Tailnet) refresh(ctx context.Context) {
 	t.selfIPs = st.TailscaleIPs
 	t.splitRes = splitRes
 	t.err = ""
+	if lock.needsSignature() && !t.lock.needsSignature() {
+		t.logf("Tailnet Lock: this device needs a signature; on a signing device run: %s", lock.SignCommand)
+	}
+	t.lock = lock
 	if st.ExitNodeStatus != nil {
 		t.exitID = st.ExitNodeStatus.ID
 	} else {
@@ -574,12 +597,14 @@ type TailnetStatus struct {
 	Routes   []string `json:"routes,omitempty"`
 	SplitDNS []string `json:"split_dns,omitempty"`
 	Error    string   `json:"error,omitempty"`
+	// Lock is set when the tailnet uses Tailnet Lock.
+	Lock *LockStatus `json:"lock,omitempty"`
 }
 
 func (t *Tailnet) Status() TailnetStatus {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	s := TailnetStatus{Name: t.cfg.Name, Enabled: t.Enabled(), State: t.state, AuthURL: t.authURL, Suffix: t.snap.Suffix, Peers: len(t.snap.Peers), SplitDNS: t.snap.SplitDNS, Error: t.err}
+	s := TailnetStatus{Name: t.cfg.Name, Enabled: t.Enabled(), State: t.state, AuthURL: t.authURL, Suffix: t.snap.Suffix, Peers: len(t.snap.Peers), SplitDNS: t.snap.SplitDNS, Error: t.err, Lock: t.lock}
 	for _, ip := range t.selfIPs {
 		s.SelfIPs = append(s.SelfIPs, ip.String())
 	}
