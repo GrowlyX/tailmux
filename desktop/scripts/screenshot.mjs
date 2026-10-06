@@ -54,8 +54,10 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(up.status, { "Content-Type": up.headers.get("content-type") ?? "text/plain" });
       res.end(Buffer.from(await up.arrayBuffer()));
     } catch (e) {
-      res.writeHead(502);
-      res.end(String(e));
+      // Log the details here; the page only needs to know the daemon failed.
+      console.error(`proxy ${req.method} ${url.pathname}: ${e.message ?? e}`);
+      res.writeHead(502, { "Content-Type": "text/plain" });
+      res.end("daemon unreachable");
     }
     return;
   }
