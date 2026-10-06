@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/banner.svg" alt="tailmux: be on all your tailnets at once, next to its menu bar panel showing four tailnets with switches and live throughput" width="100%">
+  <img src="docs/banner.svg" alt="tailmux: be on all your tailnets at once, next to its menu bar panel showing four tailnets with switches, live throughput and a Mullvad exit node" width="100%">
 </p>
 
 <p align="center">
