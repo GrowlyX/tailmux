@@ -2,6 +2,7 @@ package tun
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"log"
 	"net/netip"
@@ -24,7 +25,10 @@ const searchResolverFile = "search.tailmux"
 
 const resolverMarker = "# managed by tailmux; removed when it stops\n"
 
-const routeExists = "File exists"
+const (
+	routeExists  = "File exists"
+	routeMissing = "not in table"
+)
 
 type darwinOS struct {
 	// pinned are the scoped default routes setExit added.
@@ -79,10 +83,11 @@ func (d *darwinOS) setExit(ifname string, on bool) error {
 	if on {
 		want = primaryDefaults()
 	}
-	d.pin(want)
-	return setExitRoutes(on,
+	// The halves go in even if pinning fails, so exit traffic fails
+	// instead of leaving directly.
+	return errors.Join(d.pin(want), setExitRoutes(on,
 		func(p netip.Prefix) error { return d.addRoute(ifname, p) },
-		func(p netip.Prefix) error { return d.delRoute(ifname, p) })
+		func(p netip.Prefix) error { return d.delRoute(ifname, p) }))
 }
 
 func primaryDefaults() []scopedDefault {
@@ -119,31 +124,42 @@ func parseRouteGet(family, out string) (scopedDefault, bool) {
 
 // pin adds the scoped default routes in want and removes the ones it
 // added before that aren't. Routes that were already there aren't ours.
-func (d *darwinOS) pin(want []scopedDefault) {
+// Only IPv4 errors count, as with the halves.
+func (d *darwinOS) pin(want []scopedDefault) error {
+	var errs []error
 	var pinned []scopedDefault
 	for _, r := range d.pinned {
 		if slices.Contains(want, r) {
+			continue
+		}
+		if err := r.route("delete"); err != nil && !strings.Contains(err.Error(), routeMissing) {
 			pinned = append(pinned, r)
-		} else if err := r.route("delete"); err != nil {
-			log.Printf("tun: remove scoped default route: %v", err)
+			errs = append(errs, err)
 		}
 	}
 	for _, r := range want {
-		if slices.Contains(pinned, r) {
-			continue
-		}
-		switch err := r.route("add"); {
-		case err == nil:
+		err := r.route("add")
+		exists := err != nil && strings.Contains(err.Error(), routeExists)
+		switch {
+		case err == nil, exists && slices.Contains(d.pinned, r):
 			pinned = append(pinned, r)
-		case !strings.Contains(err.Error(), routeExists):
-			log.Printf("tun: add scoped default route: %v", err)
+		case exists:
+			// someone else's; leave it alone
+		case r.family == "-inet":
+			errs = append(errs, err)
+		default:
+			log.Printf("tun: exit node: no IPv6 scoped default route: %v", err)
 		}
 	}
 	d.pinned = pinned
+	return errors.Join(errs...)
 }
 
+// runRoute is /sbin/route; tests replace it.
+var runRoute = func(args ...string) error { return run("/sbin/route", args...) }
+
 func (r scopedDefault) route(cmd string) error {
-	return run("/sbin/route", "-q", "-n", cmd, r.family, "default", r.gateway, "-ifscope", r.ifname)
+	return runRoute("-q", "-n", cmd, r.family, "default", r.gateway, "-ifscope", r.ifname)
 }
 
 func (d darwinOS) setDNS(ifname string, domains, searchDomains []string, server netip.Addr) (bool, error) {
@@ -251,7 +267,7 @@ func (darwinOS) removeResolvers(keep ...map[string]bool) {
 // Routes on a utun disappear with it; the scoped default routes and
 // resolver files don't.
 func (d *darwinOS) close(string) error {
-	d.pin(nil)
+	err := d.pin(nil)
 	d.removeResolvers()
-	return nil
+	return err
 }
