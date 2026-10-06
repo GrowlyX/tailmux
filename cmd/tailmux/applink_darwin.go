@@ -56,6 +56,16 @@ func syncApplicationsApp(create bool) (string, bool, error) {
 	if src == "" || os.Getenv("TAILMUX_NO_APPLICATIONS") != "" {
 		return "", false, nil
 	}
+	// `tailmux bar`, `tailmux setup` and the daemon can all get here at
+	// once; hold a lock on the folder itself from the check to the swap.
+	dir, err := os.Open(applicationsDir)
+	if err != nil {
+		return "", false, err
+	}
+	defer dir.Close()
+	if err := syscall.Flock(int(dir.Fd()), syscall.LOCK_EX); err != nil {
+		return "", false, err
+	}
 	dst := filepath.Join(applicationsDir, appName)
 	fi, err := os.Lstat(dst)
 	switch {
@@ -67,7 +77,7 @@ func syncApplicationsApp(create bool) (string, bool, error) {
 		return "", false, err
 	case fi.Mode()&os.ModeSymlink != 0:
 		// The link the old caveats suggested: replace it with a copy.
-		if target, _ := os.Readlink(dst); !strings.HasSuffix(target, "tailmux/"+appName) {
+		if target, _ := os.Readlink(dst); !homebrewLink(target, src) {
 			return "", false, nil // someone else's link
 		}
 	default:
@@ -79,11 +89,20 @@ func syncApplicationsApp(create bool) (string, bool, error) {
 		}
 	}
 
-	// Copy next to it, then swap, so the app is never half there.
-	tmp := dst + ".tailmux-new"
-	os.RemoveAll(tmp)
+	// Copy into a private folder next to it, then swap, so the app is
+	// never half there. Under the lock, any other staging folder is left
+	// over from a crash.
+	stale, _ := filepath.Glob(filepath.Join(applicationsDir, ".tailmux-*"))
+	for _, p := range stale {
+		os.RemoveAll(p)
+	}
+	stage, err := os.MkdirTemp(applicationsDir, ".tailmux-")
+	if err != nil {
+		return "", false, err
+	}
+	defer os.RemoveAll(stage)
+	tmp := filepath.Join(stage, appName)
 	if out, err := exec.Command("/usr/bin/ditto", src, tmp).CombinedOutput(); err != nil {
-		os.RemoveAll(tmp)
 		return "", false, fmt.Errorf("copy %s: %v: %s", appName, err, strings.TrimSpace(string(out)))
 	}
 	// The daemon runs as root under `sudo brew services`; the copy should
@@ -94,11 +113,9 @@ func syncApplicationsApp(create bool) (string, bool, error) {
 			filepath.Walk(tmp, func(p string, _ os.FileInfo, _ error) error { return os.Lchown(p, uid, gid) })
 		}
 	}
-	old := dst + ".tailmux-old"
-	os.RemoveAll(old)
+	old := filepath.Join(stage, "old.app")
 	if _, err := os.Lstat(dst); err == nil {
 		if err := os.Rename(dst, old); err != nil {
-			os.RemoveAll(tmp)
 			return "", false, err
 		}
 	}
@@ -106,10 +123,29 @@ func syncApplicationsApp(create bool) (string, bool, error) {
 		os.Rename(old, dst)
 		return "", false, err
 	}
-	os.RemoveAll(old)
 	// Tell Launch Services (Spotlight, Launchpad, Finder) about it now.
 	exec.Command("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", "-f", dst).Run()
 	return dst, true, nil
+}
+
+// homebrewLink reports whether target, a symlink's destination, is this
+// Homebrew install's app: <prefix>/opt/tailmux/TailmuxBar.app, or one in
+// <prefix>/Cellar/tailmux/<version>. src is the app in the running keg.
+func homebrewLink(target, src string) bool {
+	formula := filepath.Dir(filepath.Dir(src)) // <prefix>/Cellar/tailmux
+	if filepath.Base(formula) != "tailmux" || filepath.Base(filepath.Dir(formula)) != "Cellar" {
+		return false
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(applicationsDir, target)
+	}
+	target = filepath.Clean(target)
+	prefix := filepath.Dir(filepath.Dir(formula))
+	if target == filepath.Join(prefix, "opt", "tailmux", appName) {
+		return true
+	}
+	keg := filepath.Dir(target)
+	return filepath.Base(target) == appName && filepath.Dir(keg) == formula
 }
 
 func plistValue(app, key string) string {

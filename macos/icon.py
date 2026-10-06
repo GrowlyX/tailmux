@@ -75,10 +75,11 @@ def main():
         big.resize((2 * s, 2 * s), Image.LANCZOS).save(os.path.join(iconset, f"icon_{s}x{s}@2x.png"))
     out = os.path.join(HERE, "AppIcon.icns")
     subprocess.run(["iconutil", "-c", "icns", iconset, "-o", out], check=True)
-    big.save(os.path.join(tmp, "AppIcon.png"))
-    shutil.copy(os.path.join(tmp, "AppIcon.png"), "/tmp/AppIcon-preview.png")
-    shutil.rmtree(tmp)
+    shutil.rmtree(iconset)
+    preview = os.path.join(tmp, "AppIcon-preview.png")
+    big.save(preview)
     print("wrote", out)
+    print("preview", preview)
 
 
 if __name__ == "__main__":
