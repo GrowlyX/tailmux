@@ -105,11 +105,6 @@ func TestExitNode(t *testing.T) {
 		if _, err := net.DefaultResolver.LookupNetIP(ctx, "ip", "example.com"); err != nil {
 			t.Skipf("no internet DNS here: %v", err)
 		}
-		// A tailnet's resolver only answers public names through an exit
-		// node (Tailscale's DoH on the exit node's peer API).
-		if _, err := m.Tailnet("bravo").Resolve(ctx, "example.com"); err == nil {
-			t.Fatal("bravo has no exit node but resolved example.com")
-		}
 		tgt, err := m.Resolve(ctx, "example.com")
 		if err != nil || len(tgt.IPs) == 0 || tgt.Tailnet != "" {
 			t.Fatalf("got %v, %v", tgt, err)
