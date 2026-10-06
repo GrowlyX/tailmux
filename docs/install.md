@@ -7,7 +7,8 @@ brew install growlyx/tap/tailmux
 tailmux setup
 ```
 
-This builds the CLI from source. On macOS it also builds the [menu bar app](menubar.md).
+This builds the CLI from source. On macOS it also builds the [menu bar app](menubar.md),
+which `tailmux setup` puts in `/Applications`.
 The config lives at `$(brew --prefix)/etc/tailmux/config.json` and state at
 `$(brew --prefix)/var/lib/tailmux`. The CLI and the background service share both.
 

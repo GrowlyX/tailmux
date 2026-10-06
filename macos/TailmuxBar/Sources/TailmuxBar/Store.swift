@@ -64,13 +64,15 @@ final class Store: ObservableObject {
 
     /// Homebrew upgrades the app together with the daemon. Once the
     /// daemon is running a version this app isn't, relaunch from the
-    /// installed bundle that matches it.
+    /// installed bundle that matches it: this one's own location first
+    /// (the daemon refreshes the /Applications copy as it starts).
     private func relaunchIfUpgraded(daemonVersion: String?) {
         guard let dv = daemonVersion, dv != "dev", !relaunching,
               let mine = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
               mine != dv, mine != "ci", !mine.hasPrefix("0.0.0")
         else { return }
-        let candidates = ["/opt/homebrew/opt/tailmux/TailmuxBar.app", "/usr/local/opt/tailmux/TailmuxBar.app", "/Applications/TailmuxBar.app"]
+        let candidates = [Bundle.main.bundlePath, "/Applications/TailmuxBar.app",
+                          "/opt/homebrew/opt/tailmux/TailmuxBar.app", "/usr/local/opt/tailmux/TailmuxBar.app"]
         for path in candidates {
             guard let info = NSDictionary(contentsOfFile: path + "/Contents/Info.plist"),
                   info["CFBundleShortVersionString"] as? String == dv

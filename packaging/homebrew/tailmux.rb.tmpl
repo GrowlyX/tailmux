@@ -50,10 +50,10 @@ class Tailmux < Formula
     if OS.mac?
       s += <<~EOS
 
-        Menu bar app:
-          tailmux bar
-        or keep it in Applications (then enable "Open at login" in its menu):
-          ln -sf #{opt_prefix}/TailmuxBar.app /Applications/TailmuxBar.app
+        Menu bar app: `tailmux setup` (or `tailmux bar`) puts TailmuxBar.app
+        in /Applications, and tailmux keeps that copy current on upgrades.
+        Open it from Spotlight or Launchpad, then enable "Open at login"
+        in its settings.
       EOS
     end
     s
