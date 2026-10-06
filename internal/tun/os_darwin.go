@@ -139,12 +139,11 @@ func (d *darwinOS) pin(want []scopedDefault) error {
 	}
 	for _, r := range want {
 		err := r.route("add")
-		exists := err != nil && strings.Contains(err.Error(), routeExists)
-		switch {
-		case err == nil, exists && slices.Contains(d.pinned, r):
+		if err == nil || slices.Contains(d.pinned, r) {
 			pinned = append(pinned, r)
-		case exists:
-			// someone else's; leave it alone
+		}
+		switch {
+		case err == nil, strings.Contains(err.Error(), routeExists):
 		case r.family == "-inet":
 			errs = append(errs, err)
 		default:

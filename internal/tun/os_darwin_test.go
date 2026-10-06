@@ -70,6 +70,12 @@ func TestDarwinPin(t *testing.T) {
 	}
 
 	table.fail = errors.New("route: permission denied")
+	if err := d.pin([]scopedDefault{wifi}); err == nil {
+		t.Fatal("failed repair not reported")
+	}
+	if !slices.Equal(d.pinned, []scopedDefault{wifi}) {
+		t.Fatalf("pinned = %v; failed repair lost ownership", d.pinned)
+	}
 	if err := d.pin(nil); err == nil {
 		t.Fatal("failed removal not reported")
 	}
