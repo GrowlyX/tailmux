@@ -95,3 +95,23 @@ func TestDarwinSearchDomains(t *testing.T) {
 		}
 	}
 }
+
+func TestParseRouteGet(t *testing.T) {
+	out := `   route to: default
+destination: default
+       mask: default
+    gateway: 192.168.50.1
+  interface: en15
+      flags: <UP,GATEWAY,DONE,STATIC,PRCLONING,GLOBAL>
+ recvpipe  sendpipe  ssthresh  rtt,msec    rttvar  hopcount      mtu     expire
+       0         0         0         0         0         0      1500         0
+`
+	got, ok := parseRouteGet("-inet", out)
+	want := scopedDefault{family: "-inet", gateway: "192.168.50.1", ifname: "en15"}
+	if !ok || got != want {
+		t.Fatalf("parseRouteGet = %+v, %v; want %+v", got, ok, want)
+	}
+	if _, ok := parseRouteGet("-inet", "   route to: default\n  interface: ppp0\n"); ok {
+		t.Fatal("route without a gateway accepted")
+	}
+}
