@@ -4,6 +4,7 @@
 # service installed from another copy of tailmux isn't ours to remove.
 set -e
 unit=/etc/systemd/system/tailmux.service
-if [ "$1" = remove ] && [ -f "$unit" ] && grep -q '^ExecStart=/usr/bin/tailmux ' "$unit"; then
+# $1 is "remove" for a .deb and "0" (copies left) for an .rpm.
+if { [ "$1" = remove ] || [ "$1" = 0 ]; } && [ -f "$unit" ] && grep -q '^ExecStart=/usr/bin/tailmux ' "$unit"; then
   /usr/bin/tailmux service uninstall || true
 fi

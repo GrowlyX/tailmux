@@ -35,14 +35,18 @@ TAILMUX_API=http://127.0.0.1:21056 macos/build/TailmuxBar.app/Contents/MacOS/Tai
   The PNGs are uploaded as artifacts.
 - **homebrew**: installs the formula from a tarball of the commit, then runs
   `brew test` and `brew audit --strict`.
+- **linux-packages / linux-distros**: builds the `tailmux-cli` packages with
+  GoReleaser and installs each on its distro (Debian, Fedora, Alpine, Arch).
+  On Fedora and Arch it also runs `make && make install`.
 
 ## Releasing
 
 Push a `v*` tag. The release workflow then:
 
 1. runs the tests;
-2. publishes binaries with GoReleaser;
-3. attaches the menu bar app as a zip;
+2. publishes binaries and the `tailmux-cli` Linux packages with GoReleaser;
+3. attaches the menu bar app as a zip, and the desktop app (`.deb`, `.rpm`,
+   AppImage, Windows installers);
 4. pushes the formula to [GrowlyX/homebrew-tap](https://github.com/GrowlyX/homebrew-tap)
    using the `TAP_DEPLOY_KEY` deploy key;
 5. installs from the tap on a clean macOS runner.

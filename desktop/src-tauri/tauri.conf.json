@@ -36,6 +36,18 @@
         "depends": [
           "policykit-1"
         ],
+        "conflicts": [
+          "tailmux-cli"
+        ],
+        "preRemoveScript": "linux/prerm.sh"
+      },
+      "rpm": {
+        "depends": [
+          "polkit"
+        ],
+        "conflicts": [
+          "tailmux-cli"
+        ],
         "preRemoveScript": "linux/prerm.sh"
       }
     },

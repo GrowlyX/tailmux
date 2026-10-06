@@ -10,6 +10,9 @@ one, it installs it the same way you installed tailmux:
 - **Binary** (a release download or `go install`): downloads the archive for
   this OS and CPU, checks it against the release's `checksums.txt`, and swaps
   the executable in place.
+- **Linux packages** (`.deb`, `.rpm`, `.apk`, Arch) and **source builds**
+  (`make`, the PKGBUILD) aren't replaced. Your package manager, or your next
+  build, updates them. tailmux only tells you a release is out.
 
 The daemon watches its own executable. When an upgrade replaces it, the
 daemon shuts down cleanly (removing the TUN device and resolver files) and
