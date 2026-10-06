@@ -38,11 +38,11 @@ func (f *faultyTUN) pop(q *[]error) error {
 	return err
 }
 
-func (f *faultyTUN) Read(bufs [][]byte, sizes []int, offset int) (int, error) {
+func (f *faultyTUN) Read(slab []byte, packets []wgtun.ReadPacket) (int, error) {
 	if err := f.pop(&f.readErrs); err != nil {
 		return 0, err
 	}
-	return f.Device.Read(bufs, sizes, offset)
+	return f.Device.Read(slab, packets)
 }
 
 func (f *faultyTUN) Write(bufs [][]byte, offset int) (int, error) {
