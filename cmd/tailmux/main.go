@@ -32,9 +32,12 @@ import (
 )
 
 // Set at build time: -X main.version=... -X main.defaultConfig=...
+// -X main.selfUpdate=off makes a build only notify about releases, never
+// replace itself (source builds: `make`, the PKGBUILD).
 var (
 	version       = "dev"
 	defaultConfig = ""
+	selfUpdate    = ""
 )
 
 const usage = `tailmux: be on N tailnets at once.
@@ -261,7 +264,7 @@ func up(ctx context.Context, cfg *mux.Config, cfgPath string, verbose bool) erro
 		}
 	}
 	if cfg.Updates.CheckEnabled() {
-		um := update.NewManager(version, cfg.Updates.AutoEnabled())
+		um := update.NewManager(version, cfg.Updates.AutoEnabled() && selfUpdate != "off")
 		m.UpdateStatus = func() any { return um.Status() }
 		m.TriggerUpdate = func() error {
 			go func() {

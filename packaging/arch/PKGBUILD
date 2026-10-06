@@ -1,0 +1,47 @@
+# The tailmux CLI built from source on Arch Linux:
+#   cd packaging/arch && makepkg -si
+# Builds the newest release tag; set _ref=main (or any tag) to build
+# something else. The desktop app: `make desktop &&
+# sudo make install-desktop` from a checkout (docs/install.md).
+pkgname=tailmux-git
+_ref=latest
+pkgver=0
+pkgrel=1
+pkgdesc="Be on all your tailnets at once"
+arch=('x86_64' 'aarch64')
+url="https://github.com/GrowlyX/tailmux"
+license=('BSD-3-Clause')
+depends=('iproute2')
+optdepends=('systemd-resolved: DNS for tailnet names in TUN mode')
+makedepends=('go' 'git')
+provides=('tailmux')
+conflicts=('tailmux' 'tailmux-cli')
+source=("tailmux::git+$url.git")
+sha256sums=('SKIP')
+options=('!debug') # the binary is stripped
+
+prepare() {
+  cd tailmux
+  if [ "$_ref" = latest ]; then
+    git checkout -q "$(git describe --tags --abbrev=0 "$(git rev-list --tags --max-count=1)")"
+  else
+    git checkout -q "$_ref"
+  fi
+}
+
+pkgver() {
+  cd tailmux
+  git describe --tags --long | sed 's/^v//; s/-\([0-9]*\)-g/.r\1.g/; s/-/./g'
+}
+
+build() {
+  cd tailmux
+  export CGO_ENABLED=0 GOFLAGS="-trimpath -mod=readonly -modcacherw" GOTOOLCHAIN=auto
+  go build -ldflags "-s -w -X main.version=$(git describe --tags | sed 's/^v//') -X main.selfUpdate=off" -o tailmux ./cmd/tailmux
+}
+
+package() {
+  cd tailmux
+  install -Dm755 tailmux "$pkgdir/usr/bin/tailmux"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

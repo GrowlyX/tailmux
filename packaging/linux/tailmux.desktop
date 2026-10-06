@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=tailmux
+Comment=Be on all your tailnets at once
+Exec=tailmux-desktop
+Icon=tailmux
+Categories=Network;Utility;
+Terminal=false
+StartupNotify=false
