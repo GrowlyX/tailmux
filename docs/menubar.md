@@ -6,8 +6,13 @@
 tailmux bar
 ```
 
-The Homebrew install builds it. You can also run `ln -sf $(brew --prefix)/opt/tailmux/TailmuxBar.app /Applications/`
-and enable **Open at login** from its menu.
+The Homebrew install builds it. `tailmux setup` (or `tailmux bar`) copies it
+into `/Applications`, so Spotlight and Launchpad find it. That has to happen
+there: a formula's post-install step can't write outside Homebrew's prefix,
+and Spotlight and Launchpad skip symlinks. The daemon refreshes that copy
+whenever it starts on a new version, so it never goes stale. Then enable
+**Open at login** in its settings. To keep it out of `/Applications`, delete
+the copy and set `TAILMUX_NO_APPLICATIONS=1`.
 
 - **Icon**: Tailscale's 3×3 dot grid, with one dot lit per connected tailnet.
   Dots fill in the order that draws Tailscale's "T", so five tailnets spell the

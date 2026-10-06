@@ -64,13 +64,20 @@ final class Store: ObservableObject {
 
     /// Homebrew upgrades the app together with the daemon. Once the
     /// daemon is running a version this app isn't, relaunch from the
-    /// installed bundle that matches it.
+    /// installed bundle that matches it: this one's own location first.
+    /// The daemon refreshes the /Applications copy in the background as
+    /// it starts, so give that a while before falling back to Homebrew's.
     private func relaunchIfUpgraded(daemonVersion: String?) {
         guard let dv = daemonVersion, dv != "dev", !relaunching,
               let mine = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
               mine != dv, mine != "ci", !mine.hasPrefix("0.0.0")
-        else { return }
-        let candidates = ["/opt/homebrew/opt/tailmux/TailmuxBar.app", "/usr/local/opt/tailmux/TailmuxBar.app", "/Applications/TailmuxBar.app"]
+        else { upgradeSeen = nil; return }
+        let seen = upgradeSeen ?? Date()
+        upgradeSeen = seen
+        var candidates = [Bundle.main.bundlePath, "/Applications/TailmuxBar.app"]
+        if Date().timeIntervalSince(seen) > 30 {
+            candidates += ["/opt/homebrew/opt/tailmux/TailmuxBar.app", "/usr/local/opt/tailmux/TailmuxBar.app"]
+        }
         for path in candidates {
             guard let info = NSDictionary(contentsOfFile: path + "/Contents/Info.plist"),
                   info["CFBundleShortVersionString"] as? String == dv
@@ -86,6 +93,7 @@ final class Store: ObservableObject {
     }
 
     private var relaunching = false
+    private var upgradeSeen: Date?
 
     func setEnabled(_ name: String, _ on: Bool) {
         pending.insert(name)

@@ -95,6 +95,7 @@ func main() {
 		fmt.Println("tailmux", version)
 		return
 	case "setup":
+		linkApp()
 		if err := setup.Run(*cfgPath); err != nil {
 			log.Fatal(err)
 		}
@@ -166,9 +167,25 @@ func main() {
 	}
 }
 
-// openBar launches TailmuxBar.app: the copy installed next to this
-// binary (Homebrew puts it in the formula prefix), else /Applications.
+// linkApp puts the menu bar app in /Applications (macOS, Homebrew) and
+// says so the first time.
+func linkApp() {
+	path, wrote, err := syncApplicationsApp(true)
+	switch {
+	case err != nil:
+		fmt.Fprintf(os.Stderr, "couldn't put %s in /Applications: %v\n", appName, err)
+	case wrote:
+		fmt.Printf("put the menu bar app in %s (open it from Spotlight or Launchpad)\n", path)
+	}
+}
+
+// openBar launches TailmuxBar.app: the copy in /Applications, which it
+// creates or refreshes, else the one installed next to this binary
+// (Homebrew puts it in the formula prefix).
 func openBar() error {
+	if path, _, err := syncApplicationsApp(true); err == nil && path != "" {
+		return exec.Command("open", path).Run()
+	}
 	var cands []string
 	if exe, err := os.Executable(); err == nil {
 		if exe, err = filepath.EvalSymlinks(exe); err == nil {
@@ -212,6 +229,15 @@ func up(ctx context.Context, cfg *mux.Config, cfgPath string, verbose bool) erro
 	}
 
 	log.SetOutput(io.MultiWriter(os.Stderr, mux.Logs))
+	// After an upgrade, bring the /Applications copy of the menu bar app
+	// along. In the background: it can wait on a lock any user can hold.
+	go func() {
+		if path, wrote, err := syncApplicationsApp(false); err != nil {
+			log.Printf("menu bar app: %v", err)
+		} else if wrote {
+			log.Printf("menu bar app: updated %s", path)
+		}
+	}()
 	m := mux.New(cfg, mux.Options{Verbose: verbose})
 	m.ConfigPath = cfgPath
 	defer m.Close()
