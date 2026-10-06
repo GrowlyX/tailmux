@@ -56,14 +56,15 @@ Consider turning off key expiry for it in the admin console.
 | `pins` | none | CIDR or domain → tailnet, for contested routes |
 | `socks5` | `127.0.0.1:1055` | [Proxy mode](proxy.md) |
 | `http` | `127.0.0.1:1056` | HTTP proxy, PAC file and the [local API](menubar.md#api) |
-| `dns` | off | Optional DNS server, e.g. `127.0.0.1:1053` |
+| `dns` | off | Extra DNS server, e.g. `127.0.0.1:1053`, for [proxy-mode setups](proxy.md#an-extra-dns-server-optional); not needed in TUN mode |
 | `direct` | `true` | Proxy traffic no tailnet claims goes out normally |
 | `exit_node` | none | `{"tailnet": "home", "node": "nas"}`: send that traffic through an [exit node](exit-nodes.md) instead |
 | `state_dir` | see [install](install.md) | Logins and fake-IP table |
 | `tun.enabled` | `false` | [TUN mode](tun.md) |
 | `tun.peer_routes` | `true` | Route each tailnet device's address, for DNS names that point at one |
 | `tun.cgnat` | `false` | Route all of `100.64.0.0/10` in TUN mode |
-| `tun.fake_range` | `198.18.0.0/15` | Where fake IPs come from |
+| `tun.real_ips` | `true` | Answer names with real `100.x` addresses unless another tailnet uses the same one ([why](tun.md#why-does-a-name-resolve-to-19818xx)) |
+| `tun.fake_range` | `198.18.0.0/15` | Where fake IPs come from, for addresses several tailnets use |
 | `tun.name` / `tun.mtu` / `tun.no_dns` | auto / 1500 / false | |
 | `updates.check` | `true` | Check GitHub for releases ([updates](updates.md)) |
 | `updates.auto` | `true` | Install them and restart; `false` only notifies |

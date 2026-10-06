@@ -29,8 +29,9 @@ fails over to the next tailnet that routes it.
 ## Collisions
 
 Every tailnet numbers its devices from `100.64.0.0/10`, so two tailnets often
-share an IP. Names never collide, so prefer them. [TUN mode](tun.md) gives each
-name its own fake IP for exactly this reason.
+share an IP. Names never collide, so prefer them. When an address is shared,
+[TUN mode](tun.md#why-does-a-name-resolve-to-19818xx) gives each name its own
+fake IP for exactly this reason; otherwise names resolve to the real address.
 
 See what's there, what's contested and who wins:
 

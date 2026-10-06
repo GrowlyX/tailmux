@@ -14,13 +14,15 @@ tailmux then:
 - routes every tailnet device's own address (one /32 each) into the TUN, so a
   name in ordinary DNS that points at a device (`grafana.example.com →
   100.101.102.103`) works too;
-- answers those names with a **fake IP** from `198.18.0.0/15`, unique per name.
-  That keeps `web.work` and `web.home` apart even when both are really
-  100.64.0.1.
+- answers those names with the device's **real address** (`100.x.y.z`), like
+  the official client, as long as no other tailnet uses the same address.
+  When two tailnets do (both number a device `100.64.0.1`, say), each name
+  gets a **fake IP** from `198.18.0.0/15` instead, unique per name. That
+  keeps `web.work` and `web.home` apart. See [why 198.18.x.x](#why-does-a-name-resolve-to-19818xx).
 
 A userspace TCP/IP stack (gVisor, the same one Tailscale uses) terminates each
 TCP and UDP flow. tailmux maps fake IPs back to names and re-dials each flow
-through the owning tailnet. So `ssh db.home`, `psql -h db.corp.internal` and
+(fake or real address) through the owning tailnet. So `ssh db.home`, `psql -h db.corp.internal` and
 `http://grafana.lab` in a browser all just work.
 
 On macOS, TUN mode also installs DNS search domains, so `ssh db` works
@@ -49,6 +51,31 @@ of the internet into the TUN and sends it out through the exit node.
 
 `ping` works too. tailmux answers an echo only after the destination
 actually answered through its tailnet, so the round-trip time is real.
+
+## Why does a name resolve to 198.18.x.x?
+
+Because another tailnet has a device with the same address, and the name
+has to keep pointing at the right one. Each tailnet numbers its devices from
+`100.64.0.0/10` on its own, so `100.64.0.1` can be a device in `work`
+*and* one in `home`. tailmux can't tell which one you meant from the
+address alone, so it gives each name its own fake IP from `198.18.0.0/15`
+and remembers which device that is.
+
+That address works for everything: connections, `ping` (the round trip is
+real), browsers. It just isn't the device's own. To see the real address
+and what else claims it:
+
+```sh
+tailmux resolve db.home          # the device's real address(es)
+tailmux resolve 100.64.0.1       # which tailnet that address goes to; "contested" lists the others
+```
+
+You can always use the real address directly, e.g. `ping 100.101.102.103`.
+If several tailnets claim it, it goes to the one `tailmux resolve` shows.
+
+A name also gets a fake IP when its real address isn't routed into the TUN,
+for example because it overlaps your LAN or because `"peer_routes": false`.
+Set `"tun": {"real_ips": false}` to always use fake IPs.
 
 ## Sleep, wake and changing networks
 

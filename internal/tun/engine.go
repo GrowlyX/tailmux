@@ -42,7 +42,11 @@ type Engine struct {
 	m    *mux.Mux
 	dev  wgtun.Device
 	fake *FakeIPs
-	mtu  int
+	// routed, if set, reports whether ip is routed into the TUN; tailnet
+	// names whose real addresses are, and that no other tailnet claims,
+	// are answered with those instead of a fake IP. Nil: always fake.
+	routed func(ip netip.Addr) bool
+	mtu    int
 
 	s  *stack.Stack
 	ep *channel.Endpoint
@@ -334,9 +338,10 @@ func (e *Engine) serveDNS(c *gonet.UDPConn) {
 	}
 }
 
-// answerDNS gives every tailnet name a fake address. Names that don't
-// exist get NXDOMAIN, checked against the owning tailnet's own resolver.
-// With an exit node, other names get their real addresses.
+// answerDNS answers tailnet names with their real addresses when those
+// are unambiguous, else with a fake address (see addrsFor). Names that
+// don't exist get NXDOMAIN, checked against the owning tailnet's own
+// resolver. With an exit node, other names get their real addresses.
 func (e *Engine) answerDNS(query []byte) []byte {
 	var p dnsmessage.Parser
 	h, err := p.Start(query)
@@ -350,10 +355,17 @@ func (e *Engine) answerDNS(query []byte) []byte {
 	rh := dnsmessage.Header{ID: h.ID, Response: true, Authoritative: true, RecursionDesired: h.RecursionDesired, RecursionAvailable: true, RCode: dnsmessage.RCodeNameError}
 	name := q.Name.String()
 	var answers []netip.Addr
+	ttl := uint32(60)
 	if d := e.m.Router().RouteName(name); d.OK() {
 		if len(d.IPs) > 0 {
 			rh.RCode = dnsmessage.RCodeSuccess
-			answers = []netip.Addr{e.fake.For(name)}
+			var ips []netip.Addr
+			for _, s := range d.IPs {
+				if ip, err := netip.ParseAddr(s); err == nil {
+					ips = append(ips, ip)
+				}
+			}
+			answers, ttl = e.addrsFor(name, d.Tailnet, ips)
 		} else {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			tgt, err := e.m.Resolve(ctx, name)
@@ -373,7 +385,7 @@ func (e *Engine) answerDNS(query []byte) []byte {
 				answers = tgt.IPs
 			default:
 				rh.RCode = dnsmessage.RCodeSuccess
-				answers = []netip.Addr{e.fake.For(name)}
+				answers, ttl = e.addrsFor(name, tgt.Tailnet, tgt.IPs)
 			}
 		}
 	} else if e.m.ExitNode() != nil {
@@ -403,7 +415,7 @@ func (e *Engine) answerDNS(query []byte) []byte {
 	b.StartQuestions()
 	b.Question(q)
 	b.StartAnswers()
-	rr := dnsmessage.ResourceHeader{Name: q.Name, Class: dnsmessage.ClassINET, TTL: 60}
+	rr := dnsmessage.ResourceHeader{Name: q.Name, Class: dnsmessage.ClassINET, TTL: ttl}
 	for _, ip := range answers {
 		switch {
 		case q.Type == dnsmessage.TypeA && ip.Is4():
@@ -414,6 +426,33 @@ func (e *Engine) answerDNS(query []byte) []byte {
 	}
 	out, _ := b.Finish()
 	return out
+}
+
+// addrsFor picks the answer for a tailnet name: its real IPv4 addresses
+// if each is routed into the TUN and reaches the same tailnet with no
+// other tailnet claiming it, so `ping db.home` shows 100.x as it does with
+// the official client. Otherwise (two tailnets numbering devices alike,
+// or an address the TUN doesn't carry) a fake address unique to the
+// name. Real answers get a short TTL: a collision can appear later.
+func (e *Engine) addrsFor(name, tailnet string, ips []netip.Addr) ([]netip.Addr, uint32) {
+	if e.routed != nil {
+		r := e.m.Router()
+		var addrs []netip.Addr
+		for _, ip := range ips {
+			if !ip.Is4() || !e.routed(ip) {
+				continue
+			}
+			if d := r.RouteIP(ip); d.Tailnet != tailnet || len(d.Contested) > 0 {
+				addrs = nil
+				break
+			}
+			addrs = append(addrs, ip)
+		}
+		if len(addrs) > 0 {
+			return addrs, 10
+		}
+	}
+	return []netip.Addr{e.fake.For(name)}, 60
 }
 
 func pipe(a, b net.Conn) {

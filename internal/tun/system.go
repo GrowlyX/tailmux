@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	wgtun "github.com/tailscale/wireguard-go/tun"
@@ -54,6 +55,7 @@ type System struct {
 
 	closeErr      error
 	routes        map[netip.Prefix]bool
+	routedNow     atomic.Pointer[[]netip.Prefix] // routes, for DNS answers without s.mu
 	domains       []string
 	searchDomains []string
 	dnsActive     bool
@@ -110,6 +112,9 @@ func (s *System) newDevice() (*Engine, error) {
 		dev.Close()
 		return nil, err
 	}
+	if s.cfg.TUN.RealIPs == nil || *s.cfg.TUN.RealIPs {
+		eng.routed = s.routed
+	}
 	if err := s.os.up(ifname, s.fake.Gateway(), s.fake.Prefix(), s.cfg.TUN.MTU); err != nil {
 		eng.close()
 		return nil, fmt.Errorf("configure %s: %w", ifname, err)
@@ -138,6 +143,7 @@ func (d *systemDevice) Close() error {
 	s.dnsActive = false
 	s.exit = false
 	s.domains = nil
+	s.routedNow.Store(nil)
 	s.searchDomains = nil
 	clear(s.routes)
 	// Per-interface cleanup must run while we still own the interface.
@@ -327,6 +333,20 @@ func (s *System) DNSActive() bool {
 // reconcile makes the OS routes and DNS domains match what the running
 // tailnets claim. With force it re-applies routes and DNS even where it
 // believes they are already in place, in case the OS dropped them.
+// routed reports whether ip is inside a route sent into the TUN now.
+func (s *System) routed(ip netip.Addr) bool {
+	rs := s.routedNow.Load()
+	return rs != nil && slices.ContainsFunc(*rs, func(p netip.Prefix) bool { return p.Contains(ip) })
+}
+
+func (s *System) publishRoutes() {
+	rs := make([]netip.Prefix, 0, len(s.routes))
+	for p := range s.routes {
+		rs = append(rs, p)
+	}
+	s.routedNow.Store(&rs)
+}
+
 func (s *System) reconcile(force bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -390,6 +410,7 @@ func (s *System) reconcileLocked(force bool) {
 			s.routes[p] = true
 		}
 	}
+	s.publishRoutes()
 	// With an exit node everything goes into the TUN (routes no tailnet
 	// claims leave through the exit node), and so do all DNS lookups: "."
 	// asks the OS to send every name here, where supported.
