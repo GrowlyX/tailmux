@@ -1,6 +1,6 @@
 // Polls the daemon once a second while the window is visible and holds
 // what both windows show. Mirrors Store.swift.
-import { get, send, running, type StatusResponse, type TailnetStats, type TailnetStatus } from "./api";
+import { get, send, running, type ExitNodeInfo, type ExitNodesResponse, type ExitStatus, type StatusResponse, type TailnetStats, type TailnetStatus } from "./api";
 import { invoke, type Info } from "./bridge";
 
 export class Store {
@@ -11,10 +11,17 @@ export class Store {
   info = $state<Info | null>(null);
   loaded = $state(false);
 
+  // Exit nodes: the list is only fetched while a picker is showing (it
+  // can be hundreds of Mullvad nodes); the choice comes with /status.
+  exitNodes = $state<ExitNodeInfo[] | null>(null);
+  exitPending = $state<string | null>(null);
+  exitError = $state<string | null>(null);
+
   private timer: ReturnType<typeof setInterval> | null = null;
   private inflight = false;
 
   tailnets = $derived<TailnetStatus[]>(this.status?.tailnets ?? []);
+  exit = $derived<ExitStatus | null>(this.status?.exit_node ?? null);
   runningCount = $derived(this.tailnets.filter(running).length);
   totalRate = $derived.by(() => {
     let rx = 0, tx = 0;
@@ -87,6 +94,39 @@ export class Store {
     next.delete(name);
     this.pending = next;
     await this.refresh();
+  }
+
+  /// Loads the exit node list now and every 3 s while the window is
+  /// visible. Returns the function that stops it.
+  watchExitNodes(): () => void {
+    void this.loadExitNodes();
+    const t = setInterval(() => {
+      if (!document.hidden) void this.loadExitNodes();
+    }, 3000);
+    return () => clearInterval(t);
+  }
+
+  async loadExitNodes() {
+    try {
+      const r = await get<ExitNodesResponse>("exit-nodes");
+      this.exitNodes = r.nodes ?? [];
+    } catch {
+      // The status poll reports the daemon being down.
+    }
+  }
+
+  /// Switches the exit node (live, no restart); null turns it off. `key`
+  /// marks the row being applied.
+  async setExitNode(choice: { tailnet: string; node: string } | null, key: string) {
+    this.exitPending = key;
+    this.exitError = null;
+    try {
+      await send("PUT", "exit-node", choice ?? {});
+    } catch (e) {
+      this.exitError = e instanceof Error ? e.message : String(e);
+    }
+    this.exitPending = null;
+    await Promise.all([this.refresh(), this.loadExitNodes()]);
   }
 
   /// Latest bytes/s for a tailnet, both directions.

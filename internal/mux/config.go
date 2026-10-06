@@ -27,6 +27,10 @@ type Config struct {
 	// destinations several tailnets claim (overlapping 10.0.0.0/8s).
 	Pins map[string]string `json:"pins,omitempty"`
 
+	// ExitNode sends everything no tailnet claims through one exit node,
+	// like the official client's exit node menu. Unset: direct.
+	ExitNode *ExitNodeConfig `json:"exit_node,omitempty"`
+
 	TUN TUNConfig `json:"tun,omitzero"`
 
 	Updates UpdatesConfig `json:"updates,omitzero"`
@@ -57,6 +61,15 @@ type TUNConfig struct {
 	// NoDNS leaves the OS resolver alone; names then only work through
 	// the proxies.
 	NoDNS bool `json:"no_dns,omitempty"`
+}
+
+// ExitNodeConfig picks an exit node: a device in one of the tailnets
+// that offers itself as one, Mullvad nodes included.
+type ExitNodeConfig struct {
+	Tailnet string `json:"tailnet"`
+	// Node is the device's MagicDNS name, short name, Tailscale IP or
+	// stable node ID.
+	Node string `json:"node"`
 }
 
 // DefaultStateDir can be baked in at build time; the Homebrew formula
@@ -145,6 +158,17 @@ func (c *Config) Normalize() error {
 	for k, v := range c.Pins {
 		if !seen[strings.ToLower(v)] {
 			return fmt.Errorf("config: pin %q -> unknown tailnet %q", k, v)
+		}
+	}
+	if e := c.ExitNode; e != nil {
+		e.Tailnet = strings.ToLower(e.Tailnet)
+		switch {
+		case e.Tailnet == "" && e.Node == "":
+			c.ExitNode = nil
+		case !seen[e.Tailnet]:
+			return fmt.Errorf("config: exit_node: unknown tailnet %q", e.Tailnet)
+		case e.Node == "":
+			return fmt.Errorf("config: exit_node: no node")
 		}
 	}
 	return nil

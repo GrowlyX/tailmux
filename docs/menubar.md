@@ -17,6 +17,16 @@ and enable **Open at login** from its menu.
   tailmux remembers the choice.
 - **Updates**: a banner offers a new release, with an **Update** button. The
   app relaunches itself after Homebrew upgrades it.
+- **Exit node**: the row under the tailnets shows the chosen exit node and
+  opens a menu like the official app's: **None**, your own exit nodes per
+  tailnet, then Mullvad by country and city, each with **Best available**
+  (the highest-priority node online, or the highest priority if none report
+  presence). The choice applies right away. Everything no tailnet claims then
+  leaves through it; the local network stays direct. In TUN mode that covers
+  every app, in proxy mode only apps using the proxy. If the exit node can't
+  be used, the row turns orange with the reason, and that traffic is blocked
+  rather than sent direct. The main window's **Exit node** page lists every
+  node with search by name, country or city.
 - **Charts**: two minutes of per-tailnet throughput, plus a sparkline and the
   current rate on each row. Hover a row for its routes and byte totals.
 
@@ -28,10 +38,12 @@ The app uses the daemon's local HTTP API (the `http` address, default `127.0.0.1
 
 | Endpoint | |
 | --- | --- |
-| `GET /status` | Tailnets, routes, conflicts, TUN state |
+| `GET /status` | Tailnets, routes, conflicts, TUN state, the exit node (`exit_node`) |
 | `GET /stats` | Per-tailnet byte counters and 120 one-second rate samples |
 | `GET /resolve?host=` | Routing decision for one destination |
 | `GET /proxy.pac` | The PAC file |
 | `GET /peers` | Every device in every tailnet |
+| `GET /exit-nodes` | `{"current", "nodes"}`: the exit node in use, and every device offering itself as one (own first, then by country, city and priority) |
+| `PUT /exit-node` | Body `{"tailnet": "home", "node": "<fqdn or id>"}` picks one, `{}` turns it off; applies live. Requires `X-Tailmux` |
 | `POST /update` | Install the latest release now; progress shows in `/status` |
 | `POST /tailnets/{name}/enable`, `/disable` | Requires an `X-Tailmux` header, which blocks cross-site requests |

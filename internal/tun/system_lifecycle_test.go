@@ -42,6 +42,7 @@ func (o *recordingOS) setDNS(string, []string, []string, netip.Addr) (bool, erro
 	return true, nil
 }
 func (o *recordingOS) dnsIntact(string, []string, []string) bool { return !o.lostDNS }
+func (o *recordingOS) setExit(string, bool) error                { return nil }
 func (o *recordingOS) flushDNS()                                 { o.flushes++ }
 func (o *recordingOS) close(string) error {
 	o.calls = append(o.calls, "close")

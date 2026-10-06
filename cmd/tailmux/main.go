@@ -46,6 +46,10 @@ usage:
   tailmux status               tailnets, routes and conflicts
   tailmux peers [tailnet]      every device, and the name to reach it by
   tailmux resolve <host>       which tailnet a host routes through, and why
+  tailmux exit-node [filter]   list exit nodes (yours and Mullvad's)
+  tailmux exit-node use <node> send everything else through it: a name,
+                               name.tailnet, IP, or a place ("se", "Tokyo")
+  tailmux exit-node off        go direct again
   tailmux nc <host> <port>     pipe stdio to host:port (ssh ProxyCommand)
   tailmux service install      run tailmux as a system service (Linux, Windows; needs root/admin)
   tailmux service uninstall|status
@@ -129,6 +133,8 @@ func main() {
 		err = runUpdate(cfg, fs.Args())
 	case "peers":
 		err = peers(cfg, fs.Arg(0))
+	case "exit-node", "exit":
+		err = exitNode(cfg, fs.Args())
 	case "resolve":
 		if fs.NArg() != 1 {
 			fs.Usage()
@@ -236,7 +242,7 @@ func up(ctx context.Context, cfg *mux.Config, cfgPath string, verbose bool) erro
 		defer sys.Close()
 		m.Repair = func() { sys.Repair("requested") }
 		m.TUNStatus = func() any {
-			return map[string]any{"interface": sys.Interface(), "fake_range": sys.FakeIPs().Prefix().String(), "dns": sys.DNSActive()}
+			return map[string]any{"interface": sys.Interface(), "fake_range": sys.FakeIPs().Prefix().String(), "dns": sys.DNSActive(), "exit_routes": sys.ExitActive()}
 		}
 	}
 	names := make([]string, 0, len(cfg.Tailnets))
@@ -314,6 +320,13 @@ func status(cfg *mux.Config) error {
 	}
 	if t, ok := s.TUN.(map[string]any); ok {
 		fmt.Printf("\ntun: %v, fake IPs %v, OS DNS %v\n", t["interface"], t["fake_range"], t["dns"])
+	}
+	if e := s.ExitNode; e != nil {
+		state := "in use"
+		if !e.Active {
+			state = "not usable, traffic outside your tailnets is blocked: " + e.Error
+		}
+		fmt.Printf("\nexit node: %s via %s (%s)\n", cmpOr(e.Name, e.Node), e.Tailnet, state)
 	}
 	for _, t := range s.Tailnets {
 		if t.AuthURL != "" {

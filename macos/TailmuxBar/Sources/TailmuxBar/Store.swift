@@ -9,9 +9,13 @@ final class Store: ObservableObject {
     @Published var stats: [String: TailnetStats] = [:]
     @Published var offline: String?
     @Published var pending: Set<String> = []
+    @Published var exitNodes: [ExitNodeInfo] = []
+    @Published var exitPending = false
+    @Published var exitError: String?
 
     let api: API
     private var timer: Timer?
+    private var ticks = 0
 
     init(api: API = .discover()) {
         self.api = api
@@ -37,8 +41,18 @@ final class Store: ObservableObject {
         } catch {
             status = nil
             stats = [:]
+            exitNodes = []
             offline = error.localizedDescription
         }
+        // The exit node list can run to hundreds of Mullvad nodes and
+        // rarely changes; every five seconds is plenty.
+        if offline == nil && ticks % 5 == 0 { await refreshExitNodes() }
+        ticks += 1
+    }
+
+    func refreshExitNodes() async {
+        guard let r = try? await api.get("exit-nodes", as: ExitNodesResponse.self) else { return }
+        exitNodes = r.nodes ?? []
     }
 
     func startUpdate() {
@@ -86,7 +100,23 @@ final class Store: ObservableObject {
         }
     }
 
+    /// Picks an exit node, or turns it off with nil. Applies live.
+    func setExitNode(_ node: ExitNodeInfo?) {
+        exitPending = true
+        exitError = nil
+        // Move the checkmark right away; the refresh confirms it.
+        for i in exitNodes.indices { exitNodes[i].selected = exitNodes[i].key == node?.key }
+        Task {
+            do { try await api.setExitNode(tailnet: node?.tailnet, node: node?.spec) } catch { exitError = error.localizedDescription }
+            exitPending = false
+            await refresh()
+            await refreshExitNodes()
+        }
+    }
+
     // MARK: derived
+
+    var exitNode: ExitStatus? { status?.exitNode }
 
     var tailnets: [TailnetStatus] { status?.tailnets ?? [] }
     var runningCount: Int { tailnets.filter(\.running).count }
@@ -109,6 +139,94 @@ final class Store: ObservableObject {
         guard let s = stats[name] else { return [] }
         let rx = s.rx ?? [], tx = s.tx ?? []
         return zip(rx, tx).map { $0 + $1 }
+    }
+}
+
+/// The exit node list grouped the way the pickers show it: your own
+/// devices per tailnet, then located (Mullvad) nodes by country and city.
+/// The daemon already sorts the list in that order.
+struct ExitCatalog {
+    struct Group: Identifiable {
+        var id: String { tailnet }
+        var tailnet: String
+        var nodes: [ExitNodeInfo]
+    }
+
+    struct City: Identifiable {
+        var id: String
+        var name: String
+        var nodes: [ExitNodeInfo]
+    }
+
+    struct Country: Identifiable {
+        var id: String
+        var name: String
+        var flag: String
+        var cities: [City]
+        var nodes: [ExitNodeInfo] { cities.flatMap(\.nodes) }
+        var title: String { flag.isEmpty ? name : flag + " " + name }
+    }
+
+    struct Provider: Identifiable {
+        var id: String { tailnet }
+        var tailnet: String
+        var title: String
+        var countries: [Country]
+    }
+
+    var own: [Group] = []
+    var located: [Provider] = []
+
+    var isEmpty: Bool { own.isEmpty && located.isEmpty }
+
+    init(_ nodes: [ExitNodeInfo], query: String = "") {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        let shown = q.isEmpty ? nodes : nodes.filter { n in
+            [n.name, n.fqdn, n.tailnet, n.location?.country ?? "", n.location?.city ?? ""]
+                .contains { $0.lowercased().contains(q) }
+        }
+        for n in shown where n.location == nil {
+            if own.last?.tailnet == n.tailnet { own[own.count - 1].nodes.append(n) } else { own.append(Group(tailnet: n.tailnet, nodes: [n])) }
+        }
+        var tailnets: [String] = []
+        for n in shown where n.location != nil && !tailnets.contains(n.tailnet) { tailnets.append(n.tailnet) }
+        for t in tailnets {
+            let ns = shown.filter { $0.tailnet == t && $0.location != nil }
+            var countries: [Country] = []
+            for n in ns {
+                let l = n.location!
+                let country = l.country ?? l.countryCode ?? "Elsewhere"
+                let city = l.city ?? l.cityCode ?? country
+                if countries.last?.name != country {
+                    countries.append(Country(id: t + "/" + country, name: country, flag: l.flag, cities: []))
+                }
+                let ci = countries.count - 1
+                if countries[ci].cities.last?.name == city {
+                    countries[ci].cities[countries[ci].cities.count - 1].nodes.append(n)
+                } else {
+                    countries[ci].cities.append(City(id: countries[ci].id + "/" + city, name: city, nodes: [n]))
+                }
+            }
+            var title = ns.contains(where: \.isMullvad) ? "Mullvad" : "By location"
+            if tailnets.count > 1 { title += " · " + t }
+            located.append(Provider(tailnet: t, title: title, countries: countries))
+        }
+    }
+
+    /// The node "Best available" picks: the highest priority among the
+    /// online ones. Mullvad nodes may not report presence, so with none
+    /// online it's just the highest priority.
+    static func best(_ nodes: [ExitNodeInfo]) -> ExitNodeInfo? {
+        let pool = nodes.contains(where: \.online) ? nodes.filter(\.online) : nodes
+        return pool.max { $0.priority < $1.priority }
+    }
+}
+
+extension ExitStatus {
+    /// "🇸🇪 Stockholm" for located nodes, else the device name.
+    var place: String {
+        guard let l = location, let city = l.city ?? l.country else { return displayName }
+        return l.flag.isEmpty ? city : l.flag + " " + city
     }
 }
 

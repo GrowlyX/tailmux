@@ -58,6 +58,14 @@ func (darwinOS) delRoute(ifname string, p netip.Prefix) error {
 	return run("/sbin/route", "-q", "-n", "delete", family(p), "-net", p.String(), "-interface", ifname)
 }
 
+// setExit relies on tailscale's netns binding tsnet's sockets to the
+// default route's interface (IP_BOUND_IF), which the halves leave alone.
+func (d darwinOS) setExit(ifname string, on bool) error {
+	return setExitRoutes(on,
+		func(p netip.Prefix) error { return d.addRoute(ifname, p) },
+		func(p netip.Prefix) error { return d.delRoute(ifname, p) })
+}
+
 func (d darwinOS) setDNS(ifname string, domains, searchDomains []string, server netip.Addr) (bool, error) {
 	if err := os.MkdirAll(resolverDir, 0o755); err != nil {
 		return false, err
@@ -88,7 +96,9 @@ func (d darwinOS) setDNS(ifname string, domains, searchDomains []string, server 
 	}
 	body := []byte(resolverMarker + "nameserver " + server.String() + "\n")
 	for _, dom := range domains {
-		if dom == "" || strings.ContainsAny(dom, "/\\") {
+		// "." (every name, for an exit node) has no /etc/resolver form;
+		// macOS keeps using the network's resolver for other names.
+		if dom == "" || dom == "." || strings.ContainsAny(dom, "/\\") {
 			continue
 		}
 		want[dom] = true
@@ -106,6 +116,9 @@ func (d darwinOS) setDNS(ifname string, domains, searchDomains []string, server 
 
 func (darwinOS) dnsIntact(_ string, domains, searchDomains []string) bool {
 	for _, dom := range domains {
+		if dom == "." {
+			continue
+		}
 		b, err := os.ReadFile(filepath.Join(resolverDir, dom))
 		if err != nil {
 			return false

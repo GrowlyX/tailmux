@@ -33,6 +33,8 @@ func (m *Mux) HTTPHandler(socksAddr string) http.Handler {
 	api.HandleFunc("POST /restart", m.serveRestart)
 	api.HandleFunc("GET /logs", m.serveLogs)
 	api.HandleFunc("POST /tailnets/{name}/{action}", m.serveToggle)
+	api.HandleFunc("GET /exit-nodes", m.serveExitNodes)
+	api.HandleFunc("PUT /exit-node", m.serveSetExitNode)
 	api.HandleFunc("GET /proxy.pac", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-ns-proxy-autoconfig")
 		fmt.Fprint(w, m.PAC(r.Host, socksAddr))
@@ -94,6 +96,7 @@ func (m *Mux) serveConnect(w http.ResponseWriter, r *http.Request) {
 type Status struct {
 	Tailnets  []TailnetStatus `json:"tailnets"`
 	Conflicts []Conflict      `json:"conflicts,omitempty"`
+	ExitNode  *ExitStatus     `json:"exit_node,omitempty"`
 	TUN       any             `json:"tun,omitempty"`
 	Version   string          `json:"version"`
 	Update    any             `json:"update,omitempty"`
@@ -113,6 +116,7 @@ func (m *Mux) Status() Status {
 		s.Tailnets = append(s.Tailnets, t.Status())
 	}
 	s.Conflicts = m.Router().Conflicts()
+	s.ExitNode = m.exitStatus()
 	if m.TUNStatus != nil {
 		s.TUN = m.TUNStatus()
 	}

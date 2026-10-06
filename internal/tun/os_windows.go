@@ -88,6 +88,23 @@ func (windowsOS) delRoute(ifname string, p netip.Prefix) error {
 	return luid.DeleteRoute(p, nextHop(p))
 }
 
+// setExit relies on tailscale's netns binding tsnet's sockets to the
+// default route's interface (IP_UNICAST_IF), as the official client does.
+func (w windowsOS) setExit(ifname string, on bool) error {
+	return setExitRoutes(on,
+		func(p netip.Prefix) error { return w.addRoute(ifname, p) },
+		func(p netip.Prefix) error { return w.delRoute(ifname, p) })
+}
+
+// nrptName is the NRPT form of a domain: ".example.com", or "." for
+// every name (the exit node catch-all).
+func nrptName(d string) string {
+	if d == "." {
+		return d
+	}
+	return "." + d
+}
+
 // Split DNS on Windows is the Name Resolution Policy Table: registry
 // rules saying "names under these suffixes go to this server". The
 // official Tailscale client uses the same mechanism.
@@ -105,7 +122,7 @@ func (w windowsOS) setDNS(_ string, domains, _ []string, server netip.Addr) (boo
 		chunk := domains[i*nrptMaxNames : min(len(domains), (i+1)*nrptMaxNames)]
 		names := make([]string, len(chunk))
 		for j, d := range chunk {
-			names[j] = "." + d
+			names[j] = nrptName(d)
 		}
 		k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, fmt.Sprintf(`%s\%s%02d}`, nrptBase, nrptPrefix, i), registry.SET_VALUE)
 		if err != nil {
@@ -142,7 +159,7 @@ func (windowsOS) dnsIntact(_ string, domains, _ []string) bool {
 		return false
 	}
 	for _, n := range names {
-		if strings.EqualFold(n, "."+domains[0]) {
+		if strings.EqualFold(n, nrptName(domains[0])) {
 			return true
 		}
 	}

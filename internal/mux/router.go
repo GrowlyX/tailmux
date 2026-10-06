@@ -30,6 +30,20 @@ type Peer struct {
 	IPs    []netip.Addr
 	Routes []netip.Prefix // advertised subnet routes (primary only, no exit routes)
 	Online bool
+
+	ID       string   // stable node ID
+	Exit     bool     // offers itself as an exit node (and is approved)
+	Location Location // set for Mullvad and other located exit nodes
+}
+
+// Location is where an exit node is, as the tailnet reports it.
+type Location struct {
+	Country     string `json:"country,omitempty"`
+	CountryCode string `json:"country_code,omitempty"`
+	City        string `json:"city,omitempty"`
+	CityCode    string `json:"city_code,omitempty"`
+	// Priority ranks nodes in the same place; higher is better.
+	Priority int `json:"priority,omitempty"`
 }
 
 // Pin forces a prefix or domain suffix to a tailnet, overriding the

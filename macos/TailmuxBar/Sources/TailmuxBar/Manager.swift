@@ -4,16 +4,17 @@ import ServiceManagement
 import SwiftUI
 
 enum Page: String, CaseIterable, Identifiable {
-    case overview, tailnets, devices, settings, logs
+    case overview, tailnets, devices, exitNode = "exit-node", settings, logs
     var id: String { rawValue }
 
-    var title: String { rawValue.capitalized }
+    var title: String { self == .exitNode ? "Exit node" : rawValue.capitalized }
 
     var icon: String {
         switch self {
         case .overview: return "gauge.with.dots.needle.33percent"
         case .tailnets: return "circle.grid.3x3.fill"
         case .devices: return "desktopcomputer"
+        case .exitNode: return "arrow.up.forward.circle"
         case .settings: return "gearshape"
         case .logs: return "text.alignleft"
         }
@@ -33,6 +34,12 @@ final class Manager: ObservableObject {
     @Published var message: String?
     @Published var error: String?
     @Published var restartPending = false
+
+    // Exit node page.
+    @Published var exitQuery = ""
+    // Countries the user opened or closed; the one with the selected
+    // node starts open.
+    @Published var toggled: Set<String> = []
 
     // Add-tailnet sheet.
     @Published var showAdd = false
@@ -79,6 +86,7 @@ final class Manager: ObservableObject {
             self.config = config
             self.logs = logs
             if resetForm { fillForm(from: config) }
+            if page == .exitNode { await store.refreshExitNodes() }
         } catch {
             // The Store reports the daemon being down; nothing to add.
         }
@@ -140,6 +148,14 @@ final class Manager: ObservableObject {
     func remove(_ name: String) {
         run("Removed \(name). Its login is kept if you add it back.") {
             try await self.api.send("DELETE", "tailnets/\(name)")
+        }
+    }
+
+    func setExitNode(_ node: ExitNodeInfo?) {
+        let done = node.map { "Exit node: \($0.name). Applied now." } ?? "Exit node off."
+        run(done) {
+            try await self.api.setExitNode(tailnet: node?.tailnet, node: node?.spec)
+            await self.store.refreshExitNodes()
         }
     }
 

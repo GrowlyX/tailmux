@@ -69,7 +69,7 @@ const origin = `http://127.0.0.1:${server.address().port}`;
 
 const shots = [
   { name: "panel", url: "/#panel", width: 372, height: 500, fit: true },
-  ...["overview", "tailnets", "devices", "settings", "logs"].map((p) => ({ name: p, url: `/#main?page=${p}`, width: 980, height: 640 })),
+  ...["overview", "tailnets", "devices", "exit-node", "settings", "logs"].map((p) => ({ name: p, url: `/#main?page=${p}`, width: 980, height: 640 })),
 ].filter((s) => !only || only.includes(s.name));
 
 mkdirSync(out, { recursive: true });

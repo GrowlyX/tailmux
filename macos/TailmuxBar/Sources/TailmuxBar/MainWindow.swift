@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// The full app: sidebar with Overview, Tailnets, Devices, Settings, Logs.
+/// The full app: sidebar with Overview, Tailnets, Devices, Exit node,
+/// Settings, Logs.
 struct MainWindow: View {
     @ObservedObject var store: Store
     @ObservedObject var manager: Manager
@@ -22,6 +23,7 @@ struct MainWindow: View {
                     case .overview: OverviewPage(store: store, manager: manager)
                     case .tailnets: TailnetsPage(store: store, manager: manager)
                     case .devices: DevicesPage(manager: manager)
+                    case .exitNode: ExitNodePage(store: store, manager: manager)
                     case .settings: SettingsPage(store: store, manager: manager)
                     case .logs: LogsPage(manager: manager)
                     }
@@ -162,6 +164,10 @@ struct OverviewPage: View {
                 VStack(spacing: 2) {
                     ForEach(Array(store.tailnets.enumerated()), id: \.element.id) { i, t in
                         TailnetRow(tailnet: t, color: Palette.color(i), store: store)
+                    }
+                    if !store.exitNodes.isEmpty || store.exitNode != nil {
+                        Divider().padding(.horizontal, 8).padding(.vertical, 4)
+                        ExitNodeRow(store: store)
                     }
                 }
             }
@@ -408,6 +414,251 @@ struct DeviceRow: View {
             Button("Copy full name (\(peer.fqdn))") { manager.copy(peer.fqdn) }
         }
         .help("Double-click to copy \(peer.alias)")
+    }
+}
+
+// MARK: Exit node
+
+struct ExitNodePage: View {
+    @ObservedObject var store: Store
+    @ObservedObject var manager: Manager
+
+    var body: some View {
+        let catalog = ExitCatalog(store.exitNodes, query: manager.exitQuery)
+        VStack(spacing: 0) {
+            PageHeader(title: "Exit node", subtitle: "Send everything no tailnet claims through one device.") {
+                TextField("Search", text: $manager.exitQuery, prompt: Text("Search names, countries, cities"))
+                    .textFieldStyle(.roundedBorder).frame(width: 240)
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    ExitCurrentCard(store: store, manager: manager)
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        if manager.exitQuery.isEmpty {
+                            ExitPickRow(title: "None", detail: "Traffic no tailnet claims goes direct", selected: store.exitNode == nil) {
+                                manager.setExitNode(nil)
+                            }
+                        }
+                        ForEach(catalog.own) { g in
+                            VStack(alignment: .leading, spacing: 0) {
+                                ExitSectionLabel(title: g.tailnet)
+                                ForEach(g.nodes) { n in
+                                    ExitPickRow(node: n, detail: n.ips?.first ?? "") { manager.setExitNode(n) }
+                                }
+                            }
+                        }
+                        ForEach(catalog.located) { p in
+                            ExitSectionLabel(title: p.title)
+                            ForEach(p.countries) { c in
+                                ExitCountryRows(country: c, manager: manager, open: isOpen(c))
+                            }
+                        }
+                        if catalog.isEmpty {
+                            Text(store.exitNodes.isEmpty ? "No device in your tailnets offers itself as an exit node." : "Nothing matches.")
+                                .foregroundStyle(.secondary).padding(40)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+                .padding(.horizontal, 24).padding(.bottom, 24)
+            }
+        }
+    }
+
+    private func isOpen(_ c: ExitCatalog.Country) -> Bool {
+        if !manager.exitQuery.isEmpty { return true }
+        return c.nodes.contains(where: \.isSelected) != manager.toggled.contains(c.id)
+    }
+}
+
+/// What's chosen, whether traffic can use it, and what it covers.
+struct ExitCurrentCard: View {
+    @ObservedObject var store: Store
+    @ObservedObject var manager: Manager
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Circle().fill(dotColor).frame(width: 10, height: 10)
+                Text(store.exitNode?.place ?? "No exit node").font(.system(size: 15, weight: .semibold))
+                Text(state).font(.system(size: 12)).foregroundStyle(stateColor)
+                Spacer()
+                if store.exitNode != nil {
+                    Button("Turn off") { manager.setExitNode(nil) }.disabled(manager.busy)
+                }
+            }
+            Text(explanation)
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let x = store.exitNode {
+                if !x.active {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                        Text((x.error ?? "Not available") + ". That traffic is blocked, not sent direct.")
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .font(.system(size: 12))
+                }
+                HStack(spacing: 18) {
+                    Detail(label: "Device", value: x.displayName)
+                    Detail(label: "Tailnet", value: x.tailnet)
+                    if let l = x.location {
+                        Detail(label: "Location", value: [l.city, l.country].compactMap { $0 }.joined(separator: ", "))
+                    }
+                    Detail(label: "Covers", value: store.status?.tun != nil ? "Every app (TUN)" : "Apps using the proxy")
+                }
+            }
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.04)))
+    }
+
+    private var state: String {
+        guard let x = store.exitNode else { return "Off" }
+        return x.active ? "Active" : "Not working"
+    }
+
+    private var dotColor: Color {
+        guard let x = store.exitNode else { return Color.secondary.opacity(0.35) }
+        return x.active ? .green : .orange
+    }
+
+    private var stateColor: Color {
+        guard let x = store.exitNode else { return .secondary }
+        return x.active ? .green : .orange
+    }
+
+    private var explanation: String {
+        guard let x = store.exitNode else {
+            return "Traffic no tailnet claims goes straight to the internet. Pick a device below to send it through that device instead."
+        }
+        let covers = store.status?.tun != nil ? "every app (TUN mode)" : "only apps using the tailmux proxy"
+        return "Everything no tailnet claims leaves through \(x.displayName), for \(covers). Your local network stays direct."
+    }
+}
+
+struct ExitSectionLabel: View {
+    var title: String
+
+    var body: some View {
+        Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 14).padding(.bottom, 4)
+    }
+}
+
+/// A country: a header with "Best available" that opens to its cities.
+struct ExitCountryRows: View {
+    var country: ExitCatalog.Country
+    @ObservedObject var manager: Manager
+    var open: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            rows
+        }
+    }
+
+    @ViewBuilder private var rows: some View {
+        ExitGroupHeader(title: country.title, count: country.nodes.count, open: open, selected: country.nodes.contains(where: \.isSelected),
+                        best: ExitCatalog.best(country.nodes), manager: manager) {
+            if manager.toggled.contains(country.id) { manager.toggled.remove(country.id) } else { manager.toggled.insert(country.id) }
+        }
+        Divider().opacity(0.4)
+        if open {
+            ForEach(country.cities) { city in
+                let header = country.cities.count > 1 && city.nodes.count > 1
+                if header {
+                    ExitGroupHeader(title: city.name, count: city.nodes.count, open: nil, selected: false,
+                                    best: ExitCatalog.best(city.nodes), manager: manager, toggle: nil)
+                        .padding(.leading, 18)
+                    Divider().opacity(0.4)
+                }
+                ForEach(city.nodes) { n in
+                    ExitPickRow(node: n, detail: header ? n.ips?.first ?? "" : city.name) { manager.setExitNode(n) }
+                        .padding(.leading, 18)
+                }
+            }
+        }
+    }
+}
+
+struct ExitGroupHeader: View {
+    var title: String
+    var count: Int
+    var open: Bool?
+    var selected: Bool
+    var best: ExitNodeInfo?
+    @ObservedObject var manager: Manager
+    var toggle: (() -> Void)?
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if let open {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                    .frame(width: 12)
+            }
+            Text(title).font(.system(size: 13, weight: open == nil ? .regular : .medium))
+            Text("\(count)").font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary)
+            if selected { Image(systemName: "checkmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.accentColor) }
+            Spacer()
+            if let best {
+                Button("Best available") { manager.setExitNode(best) }
+                    .controlSize(.small).disabled(manager.busy)
+                    .help("Picks \(best.name): the highest priority one online")
+            }
+        }
+        .padding(.vertical, 7)
+        .contentShape(Rectangle())
+        .onTapGesture { toggle?() }
+    }
+}
+
+struct ExitPickRow: View {
+    var title: String
+    var detail: String
+    var selected: Bool
+    var online: Bool?
+    var help: String?
+    var action: () -> Void
+    @StateObject private var hover = Flag()
+
+    init(title: String, detail: String, selected: Bool, action: @escaping () -> Void) {
+        self.title = title
+        self.detail = detail
+        self.selected = selected
+        self.action = action
+    }
+
+    init(node n: ExitNodeInfo, detail: String, action: @escaping () -> Void) {
+        title = n.name
+        self.detail = detail
+        selected = n.isSelected
+        online = n.online
+        help = ([n.fqdn] + (n.ips ?? [])).joined(separator: "\n")
+        self.action = action
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "checkmark")
+                .font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.accentColor)
+                .frame(width: 12).opacity(selected ? 1 : 0)
+            if let online {
+                Circle().fill(online ? Color.green : Color.secondary.opacity(0.35)).frame(width: 7, height: 7)
+            }
+            Text(title).font(.system(size: 13, design: online == nil ? .default : .monospaced)).lineLimit(1)
+            Spacer(minLength: 12)
+            Text(detail).font(.system(size: 12, design: online == nil ? .default : .monospaced)).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .padding(.vertical, 7).padding(.horizontal, 6)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(hover.on ? 0.05 : 0)))
+        .contentShape(Rectangle())
+        .onHover { hover.on = $0 }
+        .onTapGesture(perform: action)
+        .help(help ?? "")
     }
 }
 

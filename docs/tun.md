@@ -31,6 +31,9 @@ Search domains update as tailnets are enabled or disabled, remain during
 reconnection, and are removed when the daemon stops. Existing LAN and VPN
 resolver files are preserved. `"no_dns": true` disables this DNS integration.
 
+With an [exit node](exit-nodes.md) selected, TUN mode also takes the rest
+of the internet into the TUN and sends it out through the exit node.
+
 ## Safety
 
 - **Your LAN stays yours.** A subnet that overlaps a local network is skipped
@@ -39,7 +42,8 @@ resolver files are preserved. `"no_dns": true` disables this DNS integration.
   addresses of devices in its own tailnets, not all of `100.64.0.0/10`
   (unless you set `"cgnat": true`). Turn that off with `"peer_routes": false`.
 - **No loops.** Traffic that arrives on the TUN is never dialed "directly".
-  If no tailnet claims it, the connection is refused.
+  If no tailnet claims it, the connection is refused, unless an exit node is
+  selected, in which case it goes through the exit node.
 - **Clean exit.** Routes go away with the interface. Resolver files carry a
   marker and are removed on exit, or at the next start after a crash.
 
