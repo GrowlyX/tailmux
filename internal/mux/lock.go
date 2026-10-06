@@ -27,11 +27,15 @@ type LockStatus struct {
 
 func (l *LockStatus) needsSignature() bool { return l != nil && l.Enabled && !l.Signed }
 
-// lockStatus asks the node; nil when Tailnet Lock is off or unknown.
-func (t *Tailnet) lockStatus(ctx context.Context) *LockStatus {
+// lockStatus asks the node; nil when Tailnet Lock is off. A failed read
+// is an error, not "off": the caller keeps what it knew.
+func (t *Tailnet) lockStatus(ctx context.Context) (*LockStatus, error) {
 	st, err := t.lc.TailnetLockStatus(ctx)
-	if err != nil || st == nil || !st.Enabled {
-		return nil
+	if err != nil {
+		return nil, err
+	}
+	if st == nil || !st.Enabled {
+		return nil, nil
 	}
 	l := &LockStatus{Enabled: true, Signed: st.NodeKeySigned, TrustedKeys: len(st.TrustedKeys)}
 	if st.NodeKey != nil {
@@ -43,7 +47,7 @@ func (t *Tailnet) lockStatus(ctx context.Context) *LockStatus {
 	if l.NodeKey != "" {
 		l.SignCommand = fmt.Sprintf("tailscale lock sign %s %s", l.NodeKey, l.PublicKey)
 	}
-	return l
+	return l, nil
 }
 
 // LockInfo is one entry of GET /lock.

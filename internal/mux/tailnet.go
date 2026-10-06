@@ -165,7 +165,14 @@ func (t *Tailnet) refresh(ctx context.Context) {
 	// anything for it until it's signed.
 	var lock *LockStatus
 	if st.BackendState == ipn.Running.String() {
-		lock = t.lockStatus(ctx)
+		var err error
+		if lock, err = t.lockStatus(ctx); err != nil {
+			// Keep what we knew: a slow read mustn't hand an unsigned
+			// device its routes back.
+			t.mu.Lock()
+			lock = t.lock
+			t.mu.Unlock()
+		}
 		if lock.needsSignature() {
 			snap.Running = false
 		}
