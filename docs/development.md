@@ -53,10 +53,14 @@ Push a `v*` tag. The release workflow then:
 
 ## The README banner
 
-`docs/banner.svg` is generated. Rebuild it after refreshing `docs/panel-dark.png`
-(`TailmuxBar --snapshot docs/panel-dark.png --dark`):
+`docs/banner.svg` is generated from `docs/panel-dark.png`, which is the menu
+bar panel rendered against `scripts/demo-daemon.py`, a fake of the API with
+tidy demo data. To rebuild both:
 
 ```sh
+scripts/demo-daemon.py 21099 &
+swift build -c release --disable-sandbox --package-path macos/TailmuxBar
+TAILMUX_API=http://127.0.0.1:21099 macos/TailmuxBar/.build/release/TailmuxBar --snapshot docs/panel-dark.png --dark --scale 2
 pip install fonttools brotli
 scripts/banner.py --font path/to/Satoshi-Variable.woff2
 ```
