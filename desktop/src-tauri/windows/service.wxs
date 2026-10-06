@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Uninstalling the app takes the tailmux service with it; otherwise it
+     keeps running TUN mode (and its DNS rules) with no app left to stop it.
+     Upgrades leave the service alone. -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <ComponentGroup Id="TailmuxService" />
+    <CustomAction Id="RemoveTailmuxService" Directory="INSTALLDIR"
+                  ExeCommand="&quot;[INSTALLDIR]tailmux.exe&quot; service uninstall"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="RemoveTailmuxService" Before="RemoveFiles">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
+    </InstallExecuteSequence>
+  </Fragment>
+</Wix>
