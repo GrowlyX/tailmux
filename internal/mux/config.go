@@ -61,6 +61,10 @@ type TUNConfig struct {
 	// NoDNS leaves the OS resolver alone; names then only work through
 	// the proxies.
 	NoDNS bool `json:"no_dns,omitempty"`
+	// RealIPs answers tailnet names with their real addresses when no
+	// other tailnet uses the same ones; false always hands out fake IPs.
+	// Default true.
+	RealIPs *bool `json:"real_ips,omitempty"`
 }
 
 // ExitNodeConfig picks an exit node: a device in one of the tailnets

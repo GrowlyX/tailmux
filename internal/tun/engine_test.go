@@ -297,6 +297,25 @@ func TestEngine(t *testing.T) {
 		}
 	})
 
+	t.Run("real IPs when no other tailnet has them", func(t *testing.T) {
+		e.routed = func(netip.Addr) bool { return true }
+		defer func() { e.routed = nil }()
+		// Every lab tailnet numbers its web node 100.64.0.1: still fake.
+		if ip, rc := lookup("web.bravo."); rc != dnsmessage.RCodeSuccess || !fake.Prefix().Contains(ip) {
+			t.Errorf("web.bravo: %v %v, want a fake address", ip, rc)
+		}
+		// charlie's gateway has an address no other tailnet uses.
+		want := m.Router().RouteName("gw.charlie").IPs[0]
+		if ip, rc := lookup("gw.charlie."); rc != dnsmessage.RCodeSuccess || ip.String() != want {
+			t.Errorf("gw.charlie: %v %v, want its real address %s", ip, rc, want)
+		}
+		// Not routed into the TUN (say it overlaps the LAN): fake again.
+		e.routed = func(netip.Addr) bool { return false }
+		if ip, _ := lookup("gw.charlie."); !fake.Prefix().Contains(ip) {
+			t.Errorf("gw.charlie unrouted: %v, want a fake address", ip)
+		}
+	})
+
 	t.Run("exit node carries everything else", func(t *testing.T) {
 		delta := lab.NewTailnet(t, "delta")
 		delta.ExitNode(t, ctx, "exit")

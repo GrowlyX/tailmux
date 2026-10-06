@@ -171,6 +171,33 @@ func TestSystem(t *testing.T) {
 		})
 	})
 
+	t.Run("real IPs over the kernel", func(t *testing.T) {
+		// gw.charlie's address is unique across the lab, so DNS answers
+		// with it (as the official client would), and ping shows it.
+		want := m.Router().RouteName("gw.charlie").IPs[0]
+		ip := fakeFor("gw.charlie.")
+		if ip.String() != want {
+			t.Fatalf("gw.charlie: %v, want its real address %s", ip, want)
+		}
+		if web := fakeFor("web.charlie."); !sys.FakeIPs().Prefix().Contains(web) {
+			t.Errorf("web.charlie collides with other tailnets but got %v, not a fake address", web)
+		}
+		args := []string{"-c", "1", "-W", "5"}
+		switch runtime.GOOS {
+		case "darwin":
+			args = []string{"-c", "1", "-t", "5"}
+		case "windows":
+			args = []string{"-n", "1", "-w", "5000"}
+		}
+		lab.Eventually(t, "ping "+want, 60*time.Second, func() error {
+			out, err := exec.Command("ping", append(args, want)...).CombinedOutput()
+			if err != nil {
+				return fmt.Errorf("%v: %s", err, out)
+			}
+			return nil
+		})
+	})
+
 	t.Run("repairs what the OS dropped", func(t *testing.T) {
 		// What a sleep/wake or network change can do: routes and the
 		// per-domain DNS config vanish behind tailmux's back.
