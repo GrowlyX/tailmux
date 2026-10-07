@@ -212,7 +212,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # Match the release baseline; test the AppImage on glibc 2.35.
+        os: [ubuntu-22.04, windows-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -253,6 +254,9 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm check
           if [ "$RUNNER_OS" = Windows ]; then pnpm tauri build --bundles nsis,msi; else pnpm tauri build --bundles deb,rpm,appimage; fi
+      - name: check AppImage glibc compatibility
+        if: runner.os == 'Linux'
+        run: python3 scripts/check-appimage-glibc.py desktop/src-tauri/target/release/bundle/appimage/*.AppImage
       - name: start lab tailnets and daemon
         run: |
           TAILMUX_LAB="$PWD/lab.json" go test ./internal/mux -run TestLab -timeout 0 > lab.log 2>&1 &
@@ -289,13 +293,13 @@ jobs:
         run: |
           pnpm exec playwright install --with-deps chromium
           pnpm screenshot --out ../shots
-      - name: screenshot of the real app (Linux)
+      - name: screenshot and startup check of the AppImage (Linux)
         if: runner.os == 'Linux'
         env:
           TAILMUX_API: http://127.0.0.1:21056
         run: |
           xvfb-run -a -s "-screen 0 1280x800x24" dbus-run-session -- \
-            scripts/ci-app-screenshot-linux.sh desktop/src-tauri/target/release/tailmux-desktop shots/native-linux.png
+            scripts/ci-app-screenshot-linux.sh desktop/src-tauri/target/release/bundle/appimage/*.AppImage shots/native-linux.png
       - name: screenshot of the real app (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

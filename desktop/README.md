@@ -82,8 +82,16 @@ Windows).
 
 CI commands:
 
+Linux release bundles are built on Ubuntu 22.04, with a glibc 2.35
+baseline. Build on that version for distributable packages: building on a
+newer distribution also raises the requirement for bundled GTK/WebKit
+libraries. CI and releases check every ELF file in the AppImage with
+`python3 scripts/check-appimage-glibc.py <AppImage>` (from the repository
+root; requires `readelf` from binutils). CI also launches the packaged
+AppImage on Ubuntu 22.04 and checks that it stays running.
+
 ```sh
-# ubuntu-latest
+# ubuntu-22.04
 sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libxdo-dev build-essential
 cd desktop && pnpm install --frozen-lockfile
 cp ../dist/tailmux-linux-amd64 src-tauri/binaries/tailmux-x86_64-unknown-linux-gnu
@@ -105,7 +113,7 @@ server whose `/api/` path proxies to the daemon (adding `X-Tailmux`), so the
 pages run unchanged in headless Chromium: `src/lib/bridge.ts` falls back to
 that proxy when Tauri isn't present. Capturing a Tauri webview to a file has
 no cross-platform API, and Chromium draws the same DOM, so this is what CI
-runs on both ubuntu-latest and windows-latest. It exits non-zero when the
+runs on both ubuntu-22.04 and windows-latest. It exits non-zero when the
 daemon is unreachable.
 
 ```sh

@@ -43,7 +43,7 @@ icon and window on top of the CLI.
 | | You get | For |
 | --- | --- | --- |
 | Desktop app `.deb` / `.rpm` | tray app + CLI | Debian, Ubuntu, Mint / Fedora, RHEL, openSUSE |
-| Desktop app `.AppImage` | tray app + CLI, nothing installed | any distro |
+| Desktop app `.AppImage` | tray app + CLI, nothing installed | glibc 2.35+ (Ubuntu 22.04+) |
 | `tailmux-cli` packages | CLI + daemon, no tray app | servers; `.deb`, `.rpm`, `.apk` (Alpine), `.pkg.tar.zst` (Arch) |
 | [Build from source](#build-from-source) | either | any distro, your own build |
 | Homebrew on Linux | CLI, built from source | `brew install growlyx/tap/tailmux` |

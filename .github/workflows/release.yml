@@ -54,7 +54,9 @@ jobs:
     needs: binaries
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # Keep the Linux packages compatible with glibc 2.35 (Ubuntu 22.04).
+        # ubuntu-latest can silently raise the AppImage's glibc requirement.
+        os: [ubuntu-22.04, windows-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -92,6 +94,9 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           if [ "$RUNNER_OS" = Windows ]; then bundles=nsis,msi; else bundles=deb,rpm,appimage; fi
           pnpm tauri build --bundles "$bundles" --config "{\"version\":\"$version\"}"
+      - name: check AppImage glibc compatibility
+        if: runner.os == 'Linux'
+        run: python3 scripts/check-appimage-glibc.py desktop/src-tauri/target/release/bundle/appimage/*.AppImage
       - name: attach to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
