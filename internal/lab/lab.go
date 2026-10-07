@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -114,13 +115,15 @@ func (f *Tailnet) Gateway(t *testing.T, ctx context.Context, routes ...string) {
 
 // ExitNode adds an exit node named host. Traffic through it never
 // reaches the internet: it answers any TCP connection with
-// "<tailnet> <host> <dst>", so tests can tell which exit carried it.
+// "<tailnet> <host> <dst>", so tests can tell which exit carried it, and
+// keeps it open until the client closes it.
 func (f *Tailnet) ExitNode(t *testing.T, ctx context.Context, host string) {
 	s, _ := f.Node(t, ctx, host)
 	s.RegisterFallbackTCPHandler(func(src, dst netip.AddrPort) (func(net.Conn), bool) {
 		return func(c net.Conn) {
+			defer c.Close()
 			fmt.Fprintf(c, "%s %s %s\n", f.Name, host, dst)
-			c.Close()
+			io.Copy(io.Discard, c)
 		}, true
 	})
 	exit := []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0")}

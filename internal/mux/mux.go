@@ -29,6 +29,8 @@ type Mux struct {
 	router   atomic.Pointer[Router]
 	exitCfg  atomic.Pointer[ExitNodeConfig]
 
+	exitConns exitConns
+
 	localNets localNets
 
 	// ConfigPath, if set, is where tailnet and settings changes made
@@ -344,6 +346,7 @@ func (m *Mux) dial(ctx context.Context, network, addr string, allowDirect bool) 
 	}
 	dial := m.direct.DialContext
 	remote := slices.DeleteFunc(slices.Clone(tgt.IPs), m.isLocal)
+	var via *ExitNodeConfig
 	if tgt.Tailnet != "" {
 		tn := m.get(tgt.Tailnet)
 		if tn == nil {
@@ -355,7 +358,7 @@ func (m *Mux) dial(ctx context.Context, network, addr string, allowDirect bool) 
 		if err != nil {
 			return nil, tgt, err
 		}
-		dial = tn.Dial
+		dial, via = tn.Dial, e
 		tgt.IPs = remote
 		tgt.Tailnet = e.Tailnet
 		tgt.Decision = Decision{Tailnet: e.Tailnet, Kind: KindExit, Peer: e.Node}
@@ -368,6 +371,9 @@ func (m *Mux) dial(ctx context.Context, network, addr string, allowDirect bool) 
 	var lastErr error
 	for _, ip := range tgt.IPs {
 		c, err := dial(ctx, network, net.JoinHostPort(ip.String(), port))
+		if err == nil && via != nil {
+			c, err = m.trackExit(c, via)
+		}
 		if err == nil {
 			return c, tgt, nil
 		}
