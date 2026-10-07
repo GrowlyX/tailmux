@@ -166,6 +166,9 @@ func (m *Mux) SetEnabled(ctx context.Context, name string, on bool) error {
 	if err := t.setEnabled(ctx, on); err != nil {
 		return err
 	}
+	if e := m.ExitNode(); !on && e != nil && e.Tailnet == name {
+		m.exitConns.closeAll()
+	}
 	return m.saveDisabled()
 }
 

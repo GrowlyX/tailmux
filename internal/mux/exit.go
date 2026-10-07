@@ -50,7 +50,9 @@ func (m *Mux) SetExitNode(ctx context.Context, tailnet, node string) (*ExitStatu
 		// Save the MagicDNS name: readable, and stable for Mullvad nodes.
 		want = &ExitNodeConfig{Tailnet: tailnet, Node: cmpOr(p.FQDN, node)}
 	}
-	m.exitCfg.Store(want)
+	if prev := m.exitCfg.Swap(want); !sameExitNode(prev, want) {
+		m.exitConns.closeAll()
+	}
 	for _, t := range m.list() {
 		spec := ""
 		if want != nil && t.cfg.Name == want.Tailnet {
@@ -80,6 +82,65 @@ func (m *Mux) exitTailnet() (*Tailnet, error) {
 		return nil, fmt.Errorf("exit node %s: %s", e.Node, why)
 	}
 	return t, nil
+}
+
+func sameExitNode(a, b *ExitNodeConfig) bool {
+	return a == b || (a != nil && b != nil && *a == *b)
+}
+
+// exitConns are the connections open through the exit node. They're
+// closed when it changes, so apps reconnect over the new path right
+// away instead of waiting on a connection that no longer goes anywhere.
+type exitConns struct {
+	mu    sync.Mutex
+	conns map[*exitConn]struct{}
+}
+
+// trackExit adds c, dialed through via, or closes it if the exit node
+// changed while it was being dialed.
+func (m *Mux) trackExit(c net.Conn, via *ExitNodeConfig) (net.Conn, error) {
+	s := &m.exitConns
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !sameExitNode(m.exitCfg.Load(), via) {
+		c.Close()
+		return nil, errors.New("exit node changed")
+	}
+	ec := &exitConn{Conn: c, set: s}
+	if s.conns == nil {
+		s.conns = map[*exitConn]struct{}{}
+	}
+	s.conns[ec] = struct{}{}
+	return ec, nil
+}
+
+func (s *exitConns) closeAll() {
+	s.mu.Lock()
+	conns := s.conns
+	s.conns = nil
+	s.mu.Unlock()
+	for c := range conns {
+		c.Conn.Close()
+	}
+}
+
+type exitConn struct {
+	net.Conn
+	set *exitConns
+}
+
+func (c *exitConn) Close() error {
+	c.set.mu.Lock()
+	delete(c.set.conns, c)
+	c.set.mu.Unlock()
+	return c.Conn.Close()
+}
+
+func (c *exitConn) CloseWrite() error {
+	if cw, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return cw.CloseWrite()
+	}
+	return nil
 }
 
 // localName: names that only mean something on the local network, which

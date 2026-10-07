@@ -3,6 +3,7 @@ package tun
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -354,6 +355,26 @@ func TestEngine(t *testing.T) {
 		if ip, rc := lookup("web.bravo."); rc != dnsmessage.RCodeSuccess || !fake.Prefix().Contains(ip) {
 			t.Errorf("web.bravo: %v %v, want a fake address", ip, rc)
 		}
+
+		t.Run("turning it off ends open connections", func(t *testing.T) {
+			c, err := dialTCP(netip.MustParseAddr("8.8.8.8"), 80)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.Close()
+			r := bufio.NewReader(c)
+			c.SetDeadline(time.Now().Add(10 * time.Second))
+			if _, err := r.ReadString('\n'); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := m.SetExitNode(ctx, "", ""); err != nil {
+				t.Fatal(err)
+			}
+			c.SetDeadline(time.Now().Add(5 * time.Second))
+			if _, err := r.ReadByte(); !errors.Is(err, io.EOF) {
+				t.Fatalf("got %v, want EOF", err)
+			}
+		})
 	})
 }
 
