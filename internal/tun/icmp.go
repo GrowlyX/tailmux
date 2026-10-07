@@ -27,8 +27,8 @@ func isEcho4(pkt []byte) bool {
 }
 
 // handlePing answers an echo request only if the destination really
-// answers through its tailnet, after the real round trip, so `ping`
-// shows true reachability and latency.
+// answers through its tailnet (or the exit node), after the real round
+// trip, so `ping` shows true reachability and latency.
 func (e *Engine) handlePing(pkt []byte) {
 	ip := header.IPv4(pkt)
 	dst := netip.AddrFrom4(ip.DestinationAddress().As4())
@@ -43,16 +43,7 @@ func (e *Engine) handlePing(pkt []byte) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	tgt, err := e.m.Resolve(ctx, host)
-	if err != nil || tgt.Tailnet == "" || len(tgt.IPs) == 0 {
-		return
-	}
-	target := tgt.IPs[0]
-	t := e.m.Tailnet(tgt.Tailnet)
-	if t == nil || !t.Enabled() {
-		return
-	}
-	if err := t.Ping(ctx, target); err != nil {
+	if err := e.m.Ping(ctx, host); err != nil {
 		return
 	}
 

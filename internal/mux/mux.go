@@ -379,6 +379,32 @@ func (m *Mux) dial(ctx context.Context, network, addr string, allowDirect bool) 
 	return nil, tgt, lastErr
 }
 
+// Ping sends an ICMP echo to host through the tailnet that owns it, or
+// through the exit node for anything else, and waits for the answer.
+func (m *Mux) Ping(ctx context.Context, host string) error {
+	tgt, err := m.Resolve(ctx, host)
+	if err != nil {
+		return err
+	}
+	if len(tgt.IPs) == 0 {
+		return fmt.Errorf("%s: no addresses", host)
+	}
+	ip := tgt.IPs[0]
+	var t *Tailnet
+	switch {
+	case tgt.Tailnet != "":
+		t = m.get(tgt.Tailnet)
+	case m.ExitNode() != nil && !m.isLocal(ip):
+		if t, err = m.exitTailnet(); err != nil {
+			return err
+		}
+	}
+	if t == nil || !t.Enabled() {
+		return ErrNotInTailnet
+	}
+	return t.Ping(ctx, ip)
+}
+
 // LogDial logs a connection the way every frontend does.
 func (m *Mux) LogDial(kind string, tgt Target, err error) {
 	if err == nil && (tgt.Tailnet == "" || tgt.Decision.Kind == KindExit) && !m.verbose {

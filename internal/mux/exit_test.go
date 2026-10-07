@@ -138,6 +138,20 @@ func TestExitNode(t *testing.T) {
 		}
 	})
 
+	t.Run("ping through the exit node", func(t *testing.T) {
+		// The lab's exit node pings with this host's network.
+		if c, err := net.DialTimeout("tcp", "8.8.8.8:53", 3*time.Second); err != nil {
+			t.Skipf("no internet here: %v", err)
+		} else {
+			c.Close()
+		}
+		lab.Eventually(t, "ping 8.8.8.8", 30*time.Second, func() error {
+			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			return m.Ping(ctx, "8.8.8.8")
+		})
+	})
+
 	t.Run("switch tailnets", func(t *testing.T) {
 		if _, err := m.SetExitNode(ctx, "bravo", "exit-b"); err != nil {
 			t.Fatal(err)
