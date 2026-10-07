@@ -147,6 +147,20 @@ func TestUsefulSplitDomain(t *testing.T) {
 	}
 }
 
+// A self-hosted control server often has a MagicDNS suffix under a domain
+// it also serves as split DNS (ts.example.com under example.com).
+func TestUsefulSplitDomainParentOfSuffix(t *testing.T) {
+	for dom, want := range map[string]bool{
+		"example.com":    true,  // parent of the suffix, but a real split domain
+		"ts.example.com": false, // the suffix itself
+		"ts.net":         false, // still every tailnet's
+	} {
+		if got := usefulSplitDomain(dom, "ts.example.com"); got != want {
+			t.Errorf("usefulSplitDomain(%q) = %v, want %v", dom, got, want)
+		}
+	}
+}
+
 func TestPeerAddrs(t *testing.T) {
 	got := testRouter(Pins{}).PeerAddrs()
 	var s []string

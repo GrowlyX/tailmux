@@ -461,14 +461,16 @@ func (t *Tailnet) ownName(name string) bool {
 
 // usefulSplitDomain filters a tailnet's DNS routes down to the ones that
 // mean "this tailnet owns these names". Dropped: empty (MagicDNS-internal
-// ExtraRecords), reverse zones, and anything at or above the MagicDNS
-// suffix, like the "ts.net" route Tailscale adds for its public names,
-// which every tailnet has and none owns.
+// ExtraRecords), reverse zones, the MagicDNS suffix itself, and the
+// "ts.net" route Tailscale adds for its public names, which every tailnet
+// has and none owns. A parent of the suffix that isn't one of those, like
+// "example.com" for "ts.example.com", is a real split domain: names under
+// the suffix still go to MagicDNS (see ownName).
 func usefulSplitDomain(dom, suffix string) bool {
 	switch {
 	case dom == "" || strings.HasSuffix(dom, ".arpa"):
 		return false
-	case suffix != "" && hasSuffixDomain(suffix, dom):
+	case suffix != "" && dom == suffix:
 		return false
 	case dom == "ts.net" || dom == "beta.tailscale.net":
 		return false
