@@ -13,6 +13,7 @@ import (
 
 	"github.com/GrowlyX/tailmux/internal/lab"
 	"tailscale.com/net/netns"
+	"tailscale.com/net/ping"
 )
 
 func TestExitNode(t *testing.T) {
@@ -140,10 +141,13 @@ func TestExitNode(t *testing.T) {
 
 	t.Run("ping through the exit node", func(t *testing.T) {
 		// The lab's exit node pings with this host's network.
-		if c, err := net.DialTimeout("tcp", "8.8.8.8:53", 3*time.Second); err != nil {
-			t.Skipf("no internet here: %v", err)
-		} else {
-			c.Close()
+		direct := ping.New(ctx, t.Logf, nil)
+		direct.Unprivileged = true
+		defer direct.Close()
+		pctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		if _, err := direct.Send(pctx, &net.IPAddr{IP: net.IPv4(8, 8, 8, 8)}, []byte("tailmux")); err != nil {
+			t.Skipf("this host can't ping the internet: %v", err)
 		}
 		lab.Eventually(t, "ping 8.8.8.8", 30*time.Second, func() error {
 			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
