@@ -50,15 +50,18 @@ func (m *Mux) SetExitNode(ctx context.Context, tailnet, node string) (*ExitStatu
 		// Save the MagicDNS name: readable, and stable for Mullvad nodes.
 		want = &ExitNodeConfig{Tailnet: tailnet, Node: cmpOr(p.FQDN, node)}
 	}
-	if prev := m.exitCfg.Swap(want); !sameExitNode(prev, want) {
-		m.exitConns.closeAll()
-	}
+	prev := m.exitCfg.Swap(want)
 	for _, t := range m.list() {
 		spec := ""
 		if want != nil && t.cfg.Name == want.Tailnet {
 			spec = want.Node
 		}
 		t.setExitNode(ctx, spec)
+	}
+	// Only once the tailnets use the new node: connections dialed while
+	// they still used the old one must go too.
+	if !sameExitNode(prev, want) {
+		m.exitConns.closeAll()
 	}
 	m.rebuild()
 	if err := m.editConfig(func(c *Config) { c.ExitNode = want }); err != nil {
