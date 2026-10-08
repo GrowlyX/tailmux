@@ -36,6 +36,12 @@ type Peer struct {
 	Location Location // set for Mullvad and other located exit nodes
 }
 
+// IsMullvad reports whether the peer is a Mullvad exit node shared into
+// the tailnet rather than one of its own devices.
+func (p Peer) IsMullvad() bool {
+	return strings.HasSuffix(p.FQDN, ".mullvad.ts.net")
+}
+
 // Location is where an exit node is, as the tailnet reports it.
 type Location struct {
 	Country     string `json:"country,omitempty"`

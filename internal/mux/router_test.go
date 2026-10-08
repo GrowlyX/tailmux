@@ -225,3 +225,15 @@ func TestSearchDomains(t *testing.T) {
 		t.Fatalf("SearchDomains after stop = %v", got)
 	}
 }
+
+func TestPeerIsMullvad(t *testing.T) {
+	for fqdn, want := range map[string]bool{
+		"us-nyc-wg-301.mullvad.ts.net": true,
+		"nas.tailbbbb.ts.net":          false,
+		"mullvad.tailbbbb.ts.net":      false,
+	} {
+		if got := (Peer{FQDN: fqdn}).IsMullvad(); got != want {
+			t.Errorf("%s: IsMullvad() = %v, want %v", fqdn, got, want)
+		}
+	}
+}
