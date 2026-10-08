@@ -8,6 +8,7 @@ import SwiftUI
 struct PanelView: View {
     @ObservedObject var store: Store
     var snapshot = false
+    @State private var size = CGSize.zero
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -32,6 +33,8 @@ struct PanelView: View {
         }
         .padding(14)
         .frame(width: 372)
+        .onGeometryChange(for: CGSize.self, of: \.size) { size = $0 }
+        .background(FitWindow(size: size))
         .onAppear { Task { await store.refreshExitNodes() } }
     }
 
@@ -58,6 +61,25 @@ struct PanelView: View {
         }
     }
 
+}
+
+/// MenuBarExtra's window keeps its first size, so the panel resizes it when
+/// its content changes, keeping the top edge under the menu bar.
+struct FitWindow: NSViewRepresentable {
+    var size: CGSize
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        DispatchQueue.main.async {
+            guard let window = view.window, size != .zero else { return }
+            let content = window.contentRect(forFrameRect: window.frame)
+            guard content.size != size else { return }
+            var frame = window.frameRect(forContentRect: NSRect(origin: content.origin, size: size))
+            frame.origin.y = window.frame.maxY - frame.height
+            window.setFrame(frame, display: true)
+        }
+    }
 }
 
 struct ThroughputChart: View {
