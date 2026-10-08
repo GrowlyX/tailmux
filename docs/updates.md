@@ -4,9 +4,10 @@ tailmux keeps itself current. Every six hours (and 30 seconds after
 starting) the daemon checks the latest GitHub release. If there's a newer
 one, it installs it the same way you installed tailmux:
 
-- **Homebrew**: `brew update` and `brew upgrade growlyx/tap/tailmux`, run as
-  the user who owns Homebrew even when the daemon runs as root. That also
-  upgrades the [menu bar app](menubar.md), which relaunches itself.
+- **Homebrew**: `brew upgrade growlyx/tap/tailmux` (which refreshes the tap
+  first), run as the user who owns Homebrew even when the daemon runs as
+  root. That also upgrades the [menu bar app](menubar.md), which relaunches
+  itself.
 - **Binary** (a release download or `go install`): downloads the archive for
   this OS and CPU, checks it against the release's `checksums.txt`, and swaps
   the executable in place.

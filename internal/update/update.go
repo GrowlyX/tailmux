@@ -125,9 +125,6 @@ func Install(ctx context.Context, rel *Release, exe string, logf func(string, ..
 	switch m, brew := Detect(exe); m {
 	case MethodBrew:
 		logf("updating with Homebrew (builds from source, takes a minute or two)")
-		if err := runBrew(ctx, brew, "update", "--quiet"); err != nil {
-			return err
-		}
 		return runBrew(ctx, brew, "upgrade", Formula)
 	case MethodBinary:
 		return installBinary(ctx, rel, exe, logf)
@@ -136,22 +133,26 @@ func Install(ctx context.Context, rel *Release, exe string, logf func(string, ..
 	}
 }
 
+// brewEnv makes `brew upgrade` refresh the tap first (a tap-qualified
+// formula triggers brew's own tap auto-update; 1s means always) instead
+// of a separate `brew update`, which updates every tap and core too. An
+// inherited HOMEBREW_NO_AUTO_UPDATE would skip that, so it's emptied
+// (brew only checks that it's non-empty; the last value set wins).
+var brewEnv = []string{"HOMEBREW_NO_AUTO_UPDATE=", "HOMEBREW_AUTO_UPDATE_SECS=1", "HOMEBREW_NO_ENV_HINTS=1"}
+
 // runBrew runs brew as the user who owns the Homebrew prefix. Homebrew
 // refuses to run as root, and the TUN daemon is root.
 func runBrew(ctx context.Context, brew string, args ...string) error {
 	cmd := exec.CommandContext(ctx, brew, args...)
-	cmd.Env = append(os.Environ(), "HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ENV_HINTS=1")
+	cmd.Env = append(os.Environ(), brewEnv...)
 	if os.Geteuid() == 0 {
-		uid, err := ownerUID(brew)
+		u, err := brewUser(brew)
 		if err != nil {
 			return err
 		}
-		u, err := user.LookupId(strconv.Itoa(uid))
-		if err != nil {
-			return fmt.Errorf("owner of %s: %w", brew, err)
-		}
-		cmd = exec.CommandContext(ctx, "sudo", append([]string{"-u", u.Username, "-H", "--", brew}, args...)...)
-		cmd.Env = append(os.Environ(), "HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ENV_HINTS=1")
+		// sudo resets the environment, so brew's settings go through env.
+		argv := append([]string{"-u", u.Username, "-H", "--", "env"}, brewEnv...)
+		cmd = exec.CommandContext(ctx, "sudo", append(append(argv, brew), args...)...)
 		cmd.Dir = u.HomeDir
 	}
 	out, err := cmd.CombinedOutput()
@@ -159,6 +160,22 @@ func runBrew(ctx context.Context, brew string, args ...string) error {
 		return fmt.Errorf("brew %s: %v: %s", strings.Join(args, " "), err, lastLines(string(out), 6))
 	}
 	return nil
+}
+
+// brewUser picks the non-root user to run brew as: whoever owns brew,
+// the prefix, or the Cellar, else whoever is logged in at the console.
+// bin/brew alone isn't enough: it can end up root-owned, and running
+// "as" root is exactly what Homebrew refuses.
+func brewUser(brew string) (*user.User, error) {
+	prefix := filepath.Dir(filepath.Dir(brew))
+	for _, p := range []string{brew, prefix, filepath.Join(prefix, "Cellar"), "/dev/console"} {
+		if uid, err := ownerUID(p); err == nil && uid != 0 {
+			if u, err := user.LookupId(strconv.Itoa(uid)); err == nil {
+				return u, nil // else a deleted account: try the next
+			}
+		}
+	}
+	return nil, fmt.Errorf("%s is owned by root and nobody is logged in: run `brew upgrade %s` as the user who installed Homebrew", prefix, Formula)
 }
 
 func lastLines(s string, n int) string {
