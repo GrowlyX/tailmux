@@ -221,7 +221,7 @@ func (m *Mux) ExitNodes() []ExitNodeInfo {
 				continue
 			}
 			e := ExitNodeInfo{Tailnet: snap.Name, ID: p.ID, Name: p.Name, FQDN: p.FQDN, Online: p.Online,
-				Mullvad: p.Mullvad(), Selected: p == sel}
+				Mullvad: p.IsMullvad(), Selected: p == sel}
 			for _, ip := range p.IPs {
 				e.IPs = append(e.IPs, ip.String())
 			}

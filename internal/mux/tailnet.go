@@ -611,7 +611,7 @@ func (t *Tailnet) Status() TailnetStatus {
 		s.SelfIPs = append(s.SelfIPs, ip.String())
 	}
 	for _, p := range t.snap.Peers {
-		if p.Mullvad() {
+		if p.IsMullvad() {
 			continue
 		}
 		s.Peers++

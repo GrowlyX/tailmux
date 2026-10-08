@@ -36,12 +36,10 @@ type Peer struct {
 	Location Location // set for Mullvad and other located exit nodes
 }
 
-const mullvadSuffix = ".mullvad.ts.net"
-
-// Mullvad reports whether the peer is a Mullvad exit node shared into
+// IsMullvad reports whether the peer is a Mullvad exit node shared into
 // the tailnet rather than one of its own devices.
-func (p Peer) Mullvad() bool {
-	return strings.HasSuffix(p.FQDN, mullvadSuffix)
+func (p Peer) IsMullvad() bool {
+	return strings.HasSuffix(p.FQDN, ".mullvad.ts.net")
 }
 
 // Location is where an exit node is, as the tailnet reports it.

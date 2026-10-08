@@ -218,7 +218,7 @@ func (m *Mux) Peers() []PeerInfo {
 	var out []PeerInfo
 	for _, s := range m.Router().Snapshots() {
 		for _, p := range s.Peers {
-			if p.Mullvad() {
+			if p.IsMullvad() {
 				continue
 			}
 			pi := PeerInfo{Tailnet: s.Name, Name: p.Name, Alias: p.Name + "." + s.Name, FQDN: p.FQDN, Online: p.Online}
