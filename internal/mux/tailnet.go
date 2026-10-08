@@ -606,11 +606,15 @@ type TailnetStatus struct {
 func (t *Tailnet) Status() TailnetStatus {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	s := TailnetStatus{Name: t.cfg.Name, Enabled: t.Enabled(), State: t.state, AuthURL: t.authURL, Suffix: t.snap.Suffix, Peers: len(t.snap.Peers), SplitDNS: t.snap.SplitDNS, Error: t.err, Lock: t.lock}
+	s := TailnetStatus{Name: t.cfg.Name, Enabled: t.Enabled(), State: t.state, AuthURL: t.authURL, Suffix: t.snap.Suffix, SplitDNS: t.snap.SplitDNS, Error: t.err, Lock: t.lock}
 	for _, ip := range t.selfIPs {
 		s.SelfIPs = append(s.SelfIPs, ip.String())
 	}
 	for _, p := range t.snap.Peers {
+		if p.Mullvad() {
+			continue
+		}
+		s.Peers++
 		if p.Online {
 			s.Online++
 		}
