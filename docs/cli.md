@@ -17,7 +17,8 @@ tailmux cli -profile '*' ip -4          # quote the *: your shell expands it oth
 
 With one tailnet, `-profile` can be left out. With `'*'`, every line of
 output is tagged with its tailnet, and the command fails if it failed on
-any of them.
+any of them. Like a shell loop, the runs share your input: piped input
+goes to whichever run reads it first.
 
 The CLI is the version tailmux's own nodes run, so the two always agree.
 It needs `tailmux up` running.

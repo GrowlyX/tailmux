@@ -80,6 +80,8 @@ func eachTailnet(cfgPath string, names, args []string) error {
 	var failed []string
 	for _, name := range names {
 		cmd := exec.Command(exe, append([]string{"cli", "-config", cfgPath, "-profile", name, "--"}, args...)...)
+		// Shared, like a shell loop: each child reads what the one before left.
+		cmd.Stdin = os.Stdin
 		stdout, _ := cmd.StdoutPipe()
 		stderr, _ := cmd.StderrPipe()
 		if err := cmd.Start(); err != nil {

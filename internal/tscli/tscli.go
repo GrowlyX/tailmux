@@ -50,7 +50,7 @@ func NewBridge(api, tailnet string) (*Bridge, error) {
 		b.Close()
 		return nil, err
 	}
-	base := &url.URL{Scheme: "http", Host: api, Path: "/tailnets/" + url.PathEscape(tailnet) + "/"}
+	base := &url.URL{Scheme: "http", Host: api, Path: "/tailnets/" + tailnet + "/"}
 	b.srv = &http.Server{Handler: &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			// /localapi/v0/status -> /tailnets/{name}/localapi/v0/status
