@@ -135,8 +135,10 @@ func Install(ctx context.Context, rel *Release, exe string, logf func(string, ..
 
 // brewEnv makes `brew upgrade` refresh the tap first (a tap-qualified
 // formula triggers brew's own tap auto-update; 1s means always) instead
-// of a separate `brew update`, which updates every tap and core too.
-var brewEnv = []string{"HOMEBREW_AUTO_UPDATE_SECS=1", "HOMEBREW_NO_ENV_HINTS=1"}
+// of a separate `brew update`, which updates every tap and core too. An
+// inherited HOMEBREW_NO_AUTO_UPDATE would skip that, so it's emptied
+// (brew only checks that it's non-empty; the last value set wins).
+var brewEnv = []string{"HOMEBREW_NO_AUTO_UPDATE=", "HOMEBREW_AUTO_UPDATE_SECS=1", "HOMEBREW_NO_ENV_HINTS=1"}
 
 // runBrew runs brew as the user who owns the Homebrew prefix. Homebrew
 // refuses to run as root, and the TUN daemon is root.
@@ -168,7 +170,9 @@ func brewUser(brew string) (*user.User, error) {
 	prefix := filepath.Dir(filepath.Dir(brew))
 	for _, p := range []string{brew, prefix, filepath.Join(prefix, "Cellar"), "/dev/console"} {
 		if uid, err := ownerUID(p); err == nil && uid != 0 {
-			return user.LookupId(strconv.Itoa(uid))
+			if u, err := user.LookupId(strconv.Itoa(uid)); err == nil {
+				return u, nil // else a deleted account: try the next
+			}
 		}
 	}
 	return nil, fmt.Errorf("%s is owned by root and nobody is logged in: run `brew upgrade %s` as the user who installed Homebrew", prefix, Formula)
