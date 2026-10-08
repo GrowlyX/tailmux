@@ -53,3 +53,4 @@ The app uses the daemon's local HTTP API (the `http` address, default `127.0.0.1
 | `PUT /exit-node` | Body `{"tailnet": "home", "node": "<fqdn or id>"}` picks one, `{}` turns it off; applies live. Requires `X-Tailmux` |
 | `POST /update` | Install the latest release now; progress shows in `/status` |
 | `POST /tailnets/{name}/enable`, `/disable` | Requires an `X-Tailmux` header, which blocks cross-site requests |
+| `/tailnets/{name}/localapi/...` | That tailnet's own LocalAPI, for [`tailmux cli`](cli.md). Requires `X-Tailmux` |

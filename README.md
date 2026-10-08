@@ -27,6 +27,7 @@ and subnets from every tailnet work side by side, even when two tailnets use the
 - [TUN mode](docs/tun.md): proxy-free, for every app
 - [Proxy mode](docs/proxy.md): SOCKS5, HTTP, PAC, ssh, kubectl
 - [Exit nodes](docs/exit-nodes.md): your own or Mullvad's, for everything else
+- [The tailscale CLI](docs/cli.md): `tailmux cli -profile work configure kubeconfig ...`, or `-profile '*'` for every tailnet
 - [Menu bar app](docs/menubar.md): macOS panel and window, local API
 - [Desktop app](docs/desktop.md): the same for Windows and Linux
 - [Updates](docs/updates.md): automatic, and how to turn that off

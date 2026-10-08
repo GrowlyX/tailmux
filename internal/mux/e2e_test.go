@@ -19,8 +19,11 @@ import (
 	"time"
 
 	"github.com/GrowlyX/tailmux/internal/lab"
+	"github.com/GrowlyX/tailmux/internal/tscli"
 	"golang.org/x/net/dns/dnsmessage"
 	"golang.org/x/net/proxy"
+	"tailscale.com/client/local"
+	"tailscale.com/cmd/tailscale/cli"
 	"tailscale.com/net/netns"
 )
 
@@ -371,6 +374,50 @@ func TestEndToEnd(t *testing.T) {
 		log.Printf("hello from the log ring")
 		if code, out := call("GET", "/logs?n=50", "", false); code != 200 || !strings.Contains(out, "hello from the log ring") {
 			t.Errorf("logs: %d %.200s", code, out)
+		}
+	})
+
+	t.Run("tailscale CLI against each tailnet", func(t *testing.T) {
+		api := httpLn.Addr().String()
+		for _, name := range []string{"alpha", "bravo"} {
+			var out strings.Builder
+			cli.Stdout = &out
+			err := tscli.Run(ctx, api, name, []string{"status", "--json", "--self", "--peers=false"})
+			cli.Stdout = os.Stdout
+			if err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+			if !strings.Contains(out.String(), name+".example.ts.net") {
+				t.Errorf("%s: status is from another tailnet:\n%s", name, out.String())
+			}
+		}
+
+		// Upgrades pass through too: this is the dial behind `tailscale nc`.
+		b, err := tscli.NewBridge(api, "bravo")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer b.Close()
+		lc := &local.Client{Socket: b.Path, UseSocketOnly: true}
+		c, err := lc.UserDial(ctx, "tcp", "web", 80)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+		fmt.Fprint(c, "GET / HTTP/1.0\r\nHost: web\r\n\r\n")
+		body, _ := io.ReadAll(c)
+		if !strings.Contains(string(body), "bravo web") {
+			t.Errorf("dial through bravo got %q", body)
+		}
+
+		// A web page can't reach it.
+		resp, err := http.Get("http://" + api + "/tailnets/alpha/localapi/v0/status")
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("without X-Tailmux: %s", resp.Status)
 		}
 	})
 

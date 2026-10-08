@@ -55,6 +55,9 @@ usage:
   tailmux exit-node off        go direct again
   tailmux lock [tailnet]       Tailnet Lock: is this device signed, and how to sign it
   tailmux nc <host> <port>     pipe stdio to host:port (ssh ProxyCommand)
+  tailmux cli [-profile tailnet|'*'] <tailscale args>
+                               run any tailscale command against one
+                               tailnet, or each in turn
   tailmux service install      run tailmux as a system service (Linux, Windows; needs root/admin)
   tailmux service uninstall|status
   tailmux repair               re-apply routes and DNS, flush the DNS cache
@@ -80,6 +83,14 @@ func main() {
 	cmd := "up"
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		cmd, args = args[0], args[1:]
+	}
+	if cmd == "cli" {
+		// Everything after our own flags belongs to the tailscale CLI.
+		if err := runCLI(*cfgPath, args); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
 	}
 	fs.Parse(args)
 
