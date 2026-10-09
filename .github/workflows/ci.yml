@@ -33,6 +33,7 @@ jobs:
           for os in linux darwin windows freebsd; do GOOS=$os go build ./... ; done
       - uses: golang/govulncheck-action@v1
         with:
+          go-version-input: "" # else its default, "stable", wins over go.mod
           go-version-file: go.mod
 
   test:
