@@ -86,6 +86,13 @@ type TailnetConfig struct {
 	ControlURL string `json:"control_url,omitempty"` // empty for Tailscale SaaS; set for Headscale
 	Hostname   string `json:"hostname,omitempty"`    // overrides Config.Hostname
 	Ephemeral  bool   `json:"ephemeral,omitempty"`
+	// State names the directory under state_dir that holds this
+	// tailnet's login. It is picked once, when the tailnet is added, and
+	// never follows the name: renaming a tailnet keeps its login, and a
+	// new tailnet never picks up an old one left under the same name.
+	// Configs from before it existed default to the name, which is where
+	// those logins live.
+	State string `json:"state,omitempty"`
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -141,7 +148,7 @@ func (c *Config) Normalize() error {
 	if len(c.Tailnets) == 0 {
 		return fmt.Errorf("config: no tailnets")
 	}
-	seen := map[string]bool{}
+	seen, states := map[string]bool{}, map[string]string{}
 	for i := range c.Tailnets {
 		t := &c.Tailnets[i]
 		t.Name = strings.ToLower(t.Name)
@@ -152,6 +159,17 @@ func (c *Config) Normalize() error {
 			return fmt.Errorf("config: duplicate tailnet %q", t.Name)
 		}
 		seen[t.Name] = true
+		if t.State == "" {
+			t.State = t.Name
+		}
+		if validName(t.State) != "" {
+			return fmt.Errorf("config: tailnet %q: state %q must be a single directory name", t.Name, t.State)
+		}
+		// Case-blind: on macOS and Windows "Work" and "work" are one folder.
+		if other, ok := states[strings.ToLower(t.State)]; ok {
+			return fmt.Errorf("config: tailnets %q and %q share the state %q; each needs its own login", other, t.Name, t.State)
+		}
+		states[strings.ToLower(t.State)] = t.Name
 		if v, ok := strings.CutPrefix(t.AuthKey, "env:"); ok {
 			t.AuthKey = os.Getenv(v)
 		}
@@ -176,6 +194,52 @@ func (c *Config) Normalize() error {
 		}
 	}
 	return nil
+}
+
+// PinStates records each tailnet's state directory in the config, for
+// tailnets that predate the state key. Until it is written down, the
+// state follows the name, so a rename would strand the login.
+func (c *Config) PinStates() {
+	for i := range c.Tailnets {
+		if c.Tailnets[i].State == "" {
+			c.Tailnets[i].State = strings.ToLower(c.Tailnets[i].Name)
+		}
+	}
+}
+
+// NewState picks a state directory for a tailnet being added: the name
+// if nothing uses it yet, else the name with a number. A directory that
+// already exists is never reused; it holds some other tailnet's login.
+func (c *Config) NewState(stateDir, name string) (string, error) {
+	taken := func(s string) (bool, error) {
+		for _, t := range c.Tailnets {
+			if strings.EqualFold(t.State, s) || (t.State == "" && strings.EqualFold(t.Name, s)) {
+				return true, nil
+			}
+		}
+		if strings.Contains(s, "..") || validName(s) != "" {
+			// Names are checked before they get here; this keeps the
+			// path inside state_dir regardless.
+			return true, fmt.Errorf("invalid tailnet name %q", s)
+		}
+		_, err := os.Lstat(filepath.Join(stateDir, s))
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		if err != nil {
+			// Say so rather than guess: every name would look taken.
+			return true, fmt.Errorf("state directory: %w", err)
+		}
+		return true, nil
+	}
+	s := name
+	for n := 2; ; n++ {
+		used, err := taken(s)
+		if err != nil || !used {
+			return s, err
+		}
+		s = fmt.Sprintf("%s-%d", name, n)
+	}
 }
 
 func (c *Config) pins() Pins {

@@ -21,6 +21,11 @@ A terminal UI for everything in the config:
   open it. Sign in with the account that owns *that* tailnet. The screen goes
   green as each one connects. If the daemon is running, the login goes through
   it. Otherwise setup brings the tailnets up itself just long enough to log in.
+  On that screen **x** logs the selected tailnet out and starts a new login,
+  to switch accounts or fix a login that went to the wrong tailnet.
+- **e** renames a tailnet without losing its login: the login stays with the
+  tailnet, not the name. To swap two names, rename through a spare one.
+- **d** removes a tailnet. Adding it back later needs a new login.
 - **J/K** reorders. Earlier tailnets win ties (see [routing](routing.md)).
 - **p** edits pins, one per line: `10.0.0.0/24 = home`.
 - **o** sets the device name, the proxy ports, whether TUN mode takes
@@ -79,6 +84,7 @@ signing device, and use what it prints as that tailnet's `auth_key`.
 | `tailnets[].control_url` | Tailscale | Headscale or another control server |
 | `tailnets[].hostname` | top-level `hostname` | Per-tailnet device name |
 | `tailnets[].ephemeral` | `false` | Device disappears when tailmux stops |
+| `tailnets[].state` | set when added | Folder in `state_dir` holding the login. Keeps the login through a rename; don't copy it between tailnets |
 | `hostname` | `tailmux-<host>` | Device name in every tailnet |
 | `pins` | none | CIDR or domain → tailnet, for contested routes |
 | `socks5` | `127.0.0.1:1055` | [Proxy mode](proxy.md) |

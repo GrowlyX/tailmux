@@ -127,7 +127,8 @@ func (m *Mux) Stats() Stats {
 	return s
 }
 
-// Disabled tailnets are remembered across restarts.
+// Disabled tailnets are remembered across restarts, by state directory
+// so the flag survives a rename.
 func (m *Mux) disabledPath() string { return filepath.Join(m.cfg.StateDir, "disabled.json") }
 
 func (m *Mux) loadDisabled() map[string]bool {
@@ -148,7 +149,7 @@ func (m *Mux) saveDisabled() error {
 	var names []string
 	for _, t := range m.list() {
 		if !t.Enabled() {
-			names = append(names, t.cfg.Name)
+			names = append(names, t.cfg.State)
 		}
 	}
 	b, _ := json.Marshal(names)

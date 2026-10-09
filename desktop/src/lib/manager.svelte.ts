@@ -117,8 +117,14 @@ export class Manager {
   }
 
   remove(name: string) {
-    return this.run(`Removed ${name}. Its login is kept if you add it back.`, async () => {
+    return this.run(`Removed ${name}. This device is signed out of it.`, async () => {
       await send("DELETE", `tailnets/${encodeURIComponent(name)}`);
+    });
+  }
+
+  logout(name: string) {
+    return this.run(`Logged out of ${name}. Log in again to rejoin.`, async () => {
+      await send("POST", `tailnets/${encodeURIComponent(name)}/logout`);
     });
   }
 

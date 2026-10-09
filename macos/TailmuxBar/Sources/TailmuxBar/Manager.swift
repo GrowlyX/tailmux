@@ -146,8 +146,14 @@ final class Manager: ObservableObject {
     }
 
     func remove(_ name: String) {
-        run("Removed \(name). Its login is kept if you add it back.") {
+        run("Removed \(name). This device is signed out of it.") {
             try await self.api.send("DELETE", "tailnets/\(name)")
+        }
+    }
+
+    func logout(_ name: String) {
+        run("Logged out of \(name). Log in again to rejoin.") {
+            try await self.api.send("POST", "tailnets/\(name)/logout")
         }
     }
 

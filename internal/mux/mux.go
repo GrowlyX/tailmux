@@ -103,8 +103,9 @@ func (m *Mux) Start(ctx context.Context) error {
 		}()
 	}
 	wg.Wait()
-	for name := range m.loadDisabled() {
-		if t := m.get(name); t != nil && t.lc != nil {
+	disabled := m.loadDisabled()
+	for _, t := range list {
+		if disabled[t.cfg.State] && t.lc != nil {
 			if err := t.setEnabled(ctx, false); err != nil {
 				errs = append(errs, err)
 			}

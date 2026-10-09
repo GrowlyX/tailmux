@@ -252,6 +252,9 @@ func up(ctx context.Context, cfg *mux.Config, cfgPath string, verbose bool) erro
 	m := mux.New(cfg, mux.Options{Verbose: verbose})
 	m.ConfigPath = cfgPath
 	defer m.Close()
+	if err := m.PinStates(); err != nil {
+		log.Printf("config: recording state directories: %v", err)
+	}
 
 	socksLn, err := net.Listen("tcp", cfg.SOCKS5)
 	if err != nil {

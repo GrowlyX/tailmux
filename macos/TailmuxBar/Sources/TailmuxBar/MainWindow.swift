@@ -217,9 +217,9 @@ struct TailnetsPage: View {
             ScrollView {
                 VStack(spacing: 10) {
                     ForEach(Array(store.tailnets.enumerated()), id: \.element.id) { i, t in
-                        TailnetCard(tailnet: t, color: Palette.color(i), store: store, manager: manager) {
-                            confirm.name = t.name
-                        }
+                        TailnetCard(tailnet: t, color: Palette.color(i), store: store, manager: manager,
+                                    onLogout: { confirm.ask(t.name, .logout) },
+                                    onRemove: { confirm.ask(t.name, .remove) })
                     }
                     if store.tailnets.isEmpty {
                         Text("No tailnets yet. Add one to get started.")
@@ -230,19 +230,36 @@ struct TailnetsPage: View {
             }
         }
         .sheet(isPresented: $manager.showAdd) { AddTailnetSheet(manager: manager) }
-        .confirmationDialog("Remove \(confirm.name ?? "")?", isPresented: Binding(get: { confirm.name != nil }, set: { if !$0 { confirm.name = nil } })) {
-            Button("Remove", role: .destructive) {
-                if let n = confirm.name { manager.remove(n) }
+        .confirmationDialog(confirm.title, isPresented: Binding(get: { confirm.name != nil }, set: { if !$0 { confirm.name = nil } })) {
+            Button(confirm.kind == .logout ? "Log out" : "Remove", role: .destructive) {
+                if let n = confirm.name {
+                    if confirm.kind == .logout { manager.logout(n) } else { manager.remove(n) }
+                }
                 confirm.name = nil
             }
         } message: {
-            Text("tailmux leaves this tailnet and forgets it. Its login is kept, so adding it back needs no new login.")
+            if confirm.kind == .logout {
+                Text("This device leaves the tailnet; you'll need to log in again.")
+            } else {
+                Text("Removes \(confirm.name ?? "") and signs this device out of it. Adding it back needs a new login.")
+            }
         }
     }
 }
 
 final class Pending: ObservableObject {
+    enum Kind { case remove, logout }
     @Published var name: String?
+    @Published var kind = Kind.remove
+
+    func ask(_ name: String, _ kind: Kind) {
+        self.kind = kind
+        self.name = name
+    }
+
+    var title: String {
+        kind == .logout ? "Log out of \(name ?? "")?" : "Remove \(name ?? "")?"
+    }
 }
 
 struct TailnetCard: View {
@@ -250,6 +267,7 @@ struct TailnetCard: View {
     var color: Color
     @ObservedObject var store: Store
     @ObservedObject var manager: Manager
+    var onLogout: () -> Void
     var onRemove: () -> Void
 
     var body: some View {
@@ -267,6 +285,7 @@ struct TailnetCard: View {
                     if let s = tailnet.suffix, !s.isEmpty { Button("Copy MagicDNS suffix") { manager.copy(s) } }
                     if let ip = tailnet.selfIps?.first { Button("Copy this device's IP") { manager.copy(ip) } }
                     Divider()
+                    if (tailnet.authUrl ?? "").isEmpty { Button("Log out…", action: onLogout) }
                     Button("Remove…", role: .destructive, action: onRemove)
                 } label: {
                     Image(systemName: "ellipsis.circle")
