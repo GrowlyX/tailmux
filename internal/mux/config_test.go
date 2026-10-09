@@ -45,19 +45,23 @@ func TestNewStateSkipsOldLogins(t *testing.T) {
 	dir := t.TempDir()
 	os.Mkdir(filepath.Join(dir, "work"), 0o700) // a removed tailnet's login
 	c := &Config{Tailnets: []TailnetConfig{{Name: "other", State: "home"}}}
-	if s := c.NewState(dir, "work"); s != "work-2" {
-		t.Errorf("reused a leftover login: %q", s)
+	for name, want := range map[string]string{
+		"work": "work-2", // a leftover login
+		"home": "home-2", // another tailnet's state
+		"lab":  "lab",
+	} {
+		if s, err := c.NewState(dir, name); s != want || err != nil {
+			t.Errorf("%s: %q %v, want %q", name, s, err, want)
+		}
 	}
-	if s := c.NewState(dir, "home"); s != "home-2" {
-		t.Errorf("shared another tailnet's state: %q", s)
-	}
-	if s := c.NewState(dir, "lab"); s != "lab" {
-		t.Errorf("fresh name: %q", s)
+	// An unreadable state_dir is an error, not an endless search.
+	if _, err := c.NewState(filepath.Join(dir, "\x00"), "x"); err == nil {
+		t.Error("unreadable state_dir: no error")
 	}
 }
 
 func TestNormalizeState(t *testing.T) {
-	c := &Config{Tailnets: []TailnetConfig{{Name: "a"}, {Name: "b", State: "a"}}}
+	c := &Config{Tailnets: []TailnetConfig{{Name: "a"}, {Name: "b", State: "A"}}}
 	if err := c.Normalize(); err == nil || !strings.Contains(err.Error(), "share") {
 		t.Fatalf("shared state: %v", err)
 	}

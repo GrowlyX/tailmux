@@ -141,7 +141,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case loggedOutMsg:
-		if m.login != nil {
+		if m.login != nil && m.login == msg.from {
 			m.login.err = ""
 			if msg.err != nil {
 				m.login.err = msg.err.Error()
@@ -342,7 +342,12 @@ func (m *model) tailnetForm(idx int) tea.Cmd {
 		tn.ControlURL = strings.TrimSpace(control)
 		tn.AuthKey = strings.TrimSpace(key)
 		if idx < 0 {
-			tn.State = m.cfg.NewState(m.effective().StateDir, tn.Name)
+			state, err := m.cfg.NewState(m.effective().StateDir, tn.Name)
+			if err != nil {
+				m.note = "Can't add " + tn.Name + ": " + err.Error()
+				return
+			}
+			tn.State = state
 			m.cfg.Tailnets = append(m.cfg.Tailnets, tn)
 			m.cursor = len(m.cfg.Tailnets) - 1
 			m.changed("Added " + tn.Name + ". Press s to save, l to log in.")
@@ -574,6 +579,7 @@ type loginStartedMsg struct {
 }
 
 type loggedOutMsg struct {
+	from *loginState // replies to an earlier login screen are dropped
 	name string
 	err  error
 }
@@ -581,29 +587,30 @@ type loggedOutMsg struct {
 // logout signs the device out of one tailnet and starts a new login, in
 // the daemon if one runs, else in setup's own tailnets.
 func (m *model) logout(name string) tea.Cmd {
-	addr, x := m.effective().HTTP, m.login.mux
-	viaDaemon := m.login.viaDaemon
+	addr, l := m.effective().HTTP, m.login
+	x, viaDaemon := l.mux, l.viaDaemon
+	reply := func(err error) tea.Msg { return loggedOutMsg{l, name, err} }
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		if !viaDaemon {
 			if x == nil {
-				return loggedOutMsg{name, fmt.Errorf("tailnets are still starting")}
+				return reply(fmt.Errorf("tailnets are still starting"))
 			}
-			return loggedOutMsg{name, x.Logout(ctx, name)}
+			return reply(x.Logout(ctx, name))
 		}
 		req, _ := http.NewRequestWithContext(ctx, "POST", "http://"+addr+"/tailnets/"+url.PathEscape(name)+"/logout", nil)
 		req.Header.Set("X-Tailmux", "1")
 		resp, err := (&http.Client{Transport: &http.Transport{Proxy: nil}}).Do(req)
 		if err != nil {
-			return loggedOutMsg{name, err}
+			return reply(err)
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			b, _ := io.ReadAll(resp.Body)
-			return loggedOutMsg{name, fmt.Errorf("log out: %s", strings.TrimSpace(string(b)))}
+			return reply(fmt.Errorf("log out: %s", strings.TrimSpace(string(b))))
 		}
-		return loggedOutMsg{name: name}
+		return reply(nil)
 	}
 }
 

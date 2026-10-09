@@ -50,6 +50,7 @@ func TestLoginsFollowTailnets(t *testing.T) {
 			t.Fatal(err)
 		}
 		m := New(cfg, Options{})
+		t.Cleanup(func() { m.Close() }) // a second Close is harmless
 		m.ConfigPath = path
 		if err := m.PinStates(); err != nil {
 			t.Fatal(err)

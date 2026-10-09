@@ -165,10 +165,11 @@ func (c *Config) Normalize() error {
 		if validName(t.State) != "" {
 			return fmt.Errorf("config: tailnet %q: state %q must be a single directory name", t.Name, t.State)
 		}
-		if other, ok := states[t.State]; ok {
+		// Case-blind: on macOS and Windows "Work" and "work" are one folder.
+		if other, ok := states[strings.ToLower(t.State)]; ok {
 			return fmt.Errorf("config: tailnets %q and %q share the state %q; each needs its own login", other, t.Name, t.State)
 		}
-		states[t.State] = t.Name
+		states[strings.ToLower(t.State)] = t.Name
 		if v, ok := strings.CutPrefix(t.AuthKey, "env:"); ok {
 			t.AuthKey = os.Getenv(v)
 		}
@@ -209,21 +210,31 @@ func (c *Config) PinStates() {
 // NewState picks a state directory for a tailnet being added: the name
 // if nothing uses it yet, else the name with a number. A directory that
 // already exists is never reused; it holds some other tailnet's login.
-func (c *Config) NewState(stateDir, name string) string {
-	taken := func(s string) bool {
+func (c *Config) NewState(stateDir, name string) (string, error) {
+	taken := func(s string) (bool, error) {
 		for _, t := range c.Tailnets {
 			if strings.EqualFold(t.State, s) || (t.State == "" && strings.EqualFold(t.Name, s)) {
-				return true
+				return true, nil
 			}
 		}
 		_, err := os.Lstat(filepath.Join(stateDir, s))
-		return !os.IsNotExist(err)
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		if err != nil {
+			// Say so rather than guess: every name would look taken.
+			return true, fmt.Errorf("state directory: %w", err)
+		}
+		return true, nil
 	}
 	s := name
-	for n := 2; taken(s); n++ {
+	for n := 2; ; n++ {
+		used, err := taken(s)
+		if err != nil || !used {
+			return s, err
+		}
 		s = fmt.Sprintf("%s-%d", name, n)
 	}
-	return s
 }
 
 func (c *Config) pins() Pins {

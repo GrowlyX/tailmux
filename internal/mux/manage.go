@@ -49,7 +49,12 @@ func (m *Mux) AddTailnet(tc TailnetConfig) (*Tailnet, error) {
 		prio = max(prio, t.priority+1)
 		inUse.Tailnets = append(inUse.Tailnets, t.cfg)
 	}
-	tc.State = inUse.NewState(m.cfg.StateDir, tc.Name)
+	state, err := inUse.NewState(m.cfg.StateDir, tc.Name)
+	if err != nil {
+		m.tmu.Unlock()
+		return nil, err
+	}
+	tc.State = state
 	t := newTailnet(tc, prio, tailnetOpts{stateDir: m.cfg.StateDir, verbose: m.opts.Verbose, memStore: m.opts.MemStore}, m.rebuild)
 	m.tailnets = append(m.tailnets, t)
 	m.byName[tc.Name] = t
@@ -82,6 +87,25 @@ func (m *Mux) RemoveTailnet(name string) error {
 	if t == nil {
 		return os.ErrNotExist
 	}
+	if e := m.ExitNode(); e != nil && e.Tailnet == name {
+		m.exitCfg.Store(nil)
+	}
+	m.rebuild()
+	m.saveDisabled()
+	// Save before the slow sign-out, while the name is still this
+	// tailnet's; and by state, so a tailnet added under the same name in
+	// the meantime stays.
+	err := m.editConfig(func(c *Config) {
+		if c.ExitNode != nil && strings.EqualFold(c.ExitNode.Tailnet, name) {
+			c.ExitNode = nil
+		}
+		c.Tailnets = slices.DeleteFunc(c.Tailnets, func(x TailnetConfig) bool { return strings.EqualFold(x.State, t.cfg.State) })
+		for k, v := range c.Pins {
+			if strings.EqualFold(v, name) {
+				delete(c.Pins, k)
+			}
+		}
+	})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	if t.lc != nil {
 		if err := t.lc.Logout(ctx); err != nil {
@@ -93,22 +117,7 @@ func (m *Mux) RemoveTailnet(name string) error {
 	if err := os.RemoveAll(t.srv.Dir); err != nil {
 		t.logf("forgetting the login: %v", err)
 	}
-	if e := m.ExitNode(); e != nil && e.Tailnet == name {
-		m.exitCfg.Store(nil)
-	}
-	m.rebuild()
-	m.saveDisabled()
-	return m.editConfig(func(c *Config) {
-		if c.ExitNode != nil && strings.EqualFold(c.ExitNode.Tailnet, name) {
-			c.ExitNode = nil
-		}
-		c.Tailnets = slices.DeleteFunc(c.Tailnets, func(x TailnetConfig) bool { return strings.EqualFold(x.Name, name) })
-		for k, v := range c.Pins {
-			if strings.EqualFold(v, name) {
-				delete(c.Pins, k)
-			}
-		}
-	})
+	return err
 }
 
 // Logout signs this device out of a tailnet and starts a new login, for
@@ -300,6 +309,10 @@ func (m *Mux) serveLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	// As with adding one, wait briefly so the reply carries the login URL.
 	t := m.get(name)
+	if t == nil {
+		http.Error(w, "removed while logging out", http.StatusNotFound)
+		return
+	}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if st := t.Status(); st.AuthURL != "" || st.State == "Running" {
