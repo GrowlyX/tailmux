@@ -61,10 +61,13 @@ type tailnetOpts struct {
 }
 
 func newTailnet(cfg TailnetConfig, priority int, o tailnetOpts, onChange func()) *Tailnet {
+	if cfg.State == "" {
+		cfg.State = cfg.Name
+	}
 	t := &Tailnet{cfg: cfg, priority: priority, onChange: onChange}
 	t.snap = Snapshot{Name: cfg.Name, Priority: priority}
 	t.srv = &tsnet.Server{
-		Dir:        filepath.Join(o.stateDir, cfg.Name),
+		Dir:        filepath.Join(o.stateDir, cfg.State),
 		Hostname:   cfg.Hostname,
 		AuthKey:    cfg.AuthKey,
 		ControlURL: cfg.ControlURL,
@@ -416,6 +419,40 @@ func (t *Tailnet) setEnabled(ctx context.Context, on bool) error {
 		t.onChange()
 	}
 	t.logf("%s", map[bool]string{true: "enabled", false: "disabled"}[on])
+	return nil
+}
+
+// logout signs this device out of the tailnet, which forgets the login,
+// and starts a new one: with the auth key if there is one, else through
+// a fresh login URL in the status.
+func (t *Tailnet) logout(ctx context.Context) error {
+	if t.lc == nil {
+		return fmt.Errorf("tailnet %s is not running", t.cfg.Name)
+	}
+	if err := t.lc.Logout(ctx); err != nil {
+		return fmt.Errorf("%s: log out: %w", t.cfg.Name, err)
+	}
+	t.logf("logged out")
+	// Logging out deletes the node's profile, prefs and all; without
+	// them the next login would go to Tailscale even for a Headscale
+	// tailnet. Start over with the ones tsnet and start set.
+	prefs := ipn.NewPrefs()
+	prefs.ControlURL = t.srv.ControlURL
+	prefs.Hostname = t.cfg.Hostname
+	prefs.WantRunning = t.Enabled()
+	prefs.RouteAll = true
+	if err := t.lc.Start(ctx, ipn.Options{UpdatePrefs: prefs, AuthKey: t.cfg.AuthKey}); err != nil {
+		return fmt.Errorf("%s: log in again: %w", t.cfg.Name, err)
+	}
+	if t.cfg.AuthKey == "" {
+		if err := t.lc.StartLoginInteractive(ctx); err != nil {
+			return fmt.Errorf("%s: log in again: %w", t.cfg.Name, err)
+		}
+	}
+	t.refresh(ctx)
+	if t.onChange != nil {
+		t.onChange()
+	}
 	return nil
 }
 

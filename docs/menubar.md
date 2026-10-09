@@ -54,3 +54,4 @@ The app uses the daemon's local HTTP API (the `http` address, default `127.0.0.1
 | `POST /update` | Install the latest release now; progress shows in `/status` |
 | `POST /tailnets/{name}/enable`, `/disable` | Requires an `X-Tailmux` header, which blocks cross-site requests |
 | `/tailnets/{name}/localapi/...` | That tailnet's own LocalAPI, for [`tailmux cli`](cli.md). Requires `X-Tailmux` |
+| `POST /tailnets/{name}/logout` | Signs this device out of the tailnet and starts a new login; the reply carries `auth_url` when there is one. Requires `X-Tailmux` |

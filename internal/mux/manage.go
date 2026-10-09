@@ -1,6 +1,7 @@
 package mux
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,9 +44,12 @@ func (m *Mux) AddTailnet(tc TailnetConfig) (*Tailnet, error) {
 		return nil, fmt.Errorf("a tailnet named %q already exists", tc.Name)
 	}
 	prio := 0
+	inUse := &Config{}
 	for _, t := range m.tailnets {
 		prio = max(prio, t.priority+1)
+		inUse.Tailnets = append(inUse.Tailnets, t.cfg)
 	}
+	tc.State = inUse.NewState(m.cfg.StateDir, tc.Name)
 	t := newTailnet(tc, prio, tailnetOpts{stateDir: m.cfg.StateDir, verbose: m.opts.Verbose, memStore: m.opts.MemStore}, m.rebuild)
 	m.tailnets = append(m.tailnets, t)
 	m.byName[tc.Name] = t
@@ -70,14 +74,25 @@ func (m *Mux) AddTailnet(tc TailnetConfig) (*Tailnet, error) {
 	return t, nil
 }
 
-// RemoveTailnet leaves a tailnet and removes it from the config. Its
-// login stays in the state directory, so adding it back needs no login.
+// RemoveTailnet leaves a tailnet, removes it from the config and
+// forgets its login: the device signs out, and its state directory goes,
+// so adding the tailnet back means logging in again.
 func (m *Mux) RemoveTailnet(name string) error {
 	t := m.dropTailnet(name)
 	if t == nil {
 		return os.ErrNotExist
 	}
-	go t.close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if t.lc != nil {
+		if err := t.lc.Logout(ctx); err != nil {
+			t.logf("log out: %v", err) // the login goes with the directory anyway
+		}
+	}
+	cancel()
+	t.close()
+	if err := os.RemoveAll(t.srv.Dir); err != nil {
+		t.logf("forgetting the login: %v", err)
+	}
 	if e := m.ExitNode(); e != nil && e.Tailnet == name {
 		m.exitCfg.Store(nil)
 	}
@@ -94,6 +109,16 @@ func (m *Mux) RemoveTailnet(name string) error {
 			}
 		}
 	})
+}
+
+// Logout signs this device out of a tailnet and starts a new login, for
+// switching accounts or recovering a login that went to the wrong one.
+func (m *Mux) Logout(ctx context.Context, name string) error {
+	t := m.get(name)
+	if t == nil {
+		return os.ErrNotExist
+	}
+	return t.logout(ctx)
 }
 
 func (m *Mux) dropTailnet(name string) *Tailnet {
@@ -148,8 +173,25 @@ func (m *Mux) editConfig(f func(*Config)) error {
 	if err != nil {
 		return err
 	}
+	c.PinStates()
 	f(c)
 	return c.Save(m.ConfigPath)
+}
+
+// PinStates writes each tailnet's state directory into the config file
+// if any is missing, so renaming one by hand later keeps its login.
+func (m *Mux) PinStates() error {
+	if m.ConfigPath == "" {
+		return nil
+	}
+	c, err := ReadConfig(m.ConfigPath)
+	if err != nil {
+		return err
+	}
+	if !slices.ContainsFunc(c.Tailnets, func(t TailnetConfig) bool { return t.State == "" }) {
+		return nil
+	}
+	return m.editConfig(func(*Config) {})
 }
 
 // ConfigView is GET /config: the saved config with auth keys hidden,
@@ -239,6 +281,33 @@ func (m *Mux) serveRemoveTailnet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (m *Mux) serveLogout(w http.ResponseWriter, r *http.Request) {
+	if !guard(w, r) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	name := r.PathValue("name")
+	if err := m.Logout(ctx, name); err != nil {
+		code := http.StatusInternalServerError
+		if errors.Is(err, os.ErrNotExist) {
+			code = http.StatusNotFound
+		}
+		http.Error(w, err.Error(), code)
+		return
+	}
+	// As with adding one, wait briefly so the reply carries the login URL.
+	t := m.get(name)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if st := t.Status(); st.AuthURL != "" || st.State == "Running" {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	writeJSON(w, t.Status())
 }
 
 func (m *Mux) serveSettings(w http.ResponseWriter, r *http.Request) {

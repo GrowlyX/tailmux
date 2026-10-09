@@ -129,6 +129,31 @@ func TestLogin(t *testing.T) {
 		}
 		return nil
 	})
+
+	// x logs the selected tailnet out; it comes back as a new device.
+	ip := func() string {
+		if st := m.login.statuses[0]; st.State == "Running" && len(st.SelfIPs) > 0 {
+			return st.SelfIPs[0]
+		}
+		return ""
+	}
+	was := ip()
+	_, cmd = m.Update(key("x"))
+	if cmd == nil {
+		t.Fatal("x should log out")
+	}
+	m.Update(cmd()) // loggedOutMsg
+	if m.login.err != "" {
+		t.Fatalf("log out: %s", m.login.err)
+	}
+	lab.Eventually(t, "alpha back as a new device", 60*time.Second, func() error {
+		m.Update(tickMsg(time.Now()))
+		if now := ip(); now == "" || now == was {
+			return fmt.Errorf("alpha: %s (was %s)", now, was)
+		}
+		return nil
+	})
+
 	press(m, "esc")
 	if m.screen != screenList || !strings.Contains(m.note, "2 of 2") {
 		t.Fatalf("after login: screen=%v note=%q", m.screen, m.note)

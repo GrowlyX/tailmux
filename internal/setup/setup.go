@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -67,6 +68,8 @@ type model struct {
 }
 
 func newModel(path string, cfg *mux.Config) *model {
+	// Write down where existing logins live before anything is renamed.
+	cfg.PinStates()
 	m := &model{path: path, cfg: cfg, width: 80}
 	if len(cfg.Tailnets) == 0 {
 		m.note = "No tailnets yet. Press a to add one."
@@ -137,6 +140,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.login.started(msg)
 		}
 		return m, nil
+	case loggedOutMsg:
+		if m.login != nil {
+			m.login.err = ""
+			if msg.err != nil {
+				m.login.err = msg.err.Error()
+			}
+			m.login.opened[msg.name] = false
+			m.login.refresh(m)
+		}
+		return m, m.pollDaemon()
 	}
 
 	switch m.screen {
@@ -195,8 +208,11 @@ func (m *model) updateList(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 					delete(m.cfg.Pins, k)
 				}
 			}
+			if e := m.cfg.ExitNode; e != nil && strings.EqualFold(e.Tailnet, name) {
+				m.cfg.ExitNode = nil
+			}
 			m.cursor = max(0, min(m.cursor, len(m.cfg.Tailnets)-1))
-			m.changed("Removed " + name + ". Its login stays in the state dir.")
+			m.changed("Removed " + name + ".")
 		}
 	case "t":
 		m.cfg.TUN.Enabled = !m.cfg.TUN.Enabled
@@ -326,6 +342,7 @@ func (m *model) tailnetForm(idx int) tea.Cmd {
 		tn.ControlURL = strings.TrimSpace(control)
 		tn.AuthKey = strings.TrimSpace(key)
 		if idx < 0 {
+			tn.State = m.cfg.NewState(m.effective().StateDir, tn.Name)
 			m.cfg.Tailnets = append(m.cfg.Tailnets, tn)
 			m.cursor = len(m.cfg.Tailnets) - 1
 			m.changed("Added " + tn.Name + ". Press s to save, l to log in.")
@@ -337,6 +354,9 @@ func (m *model) tailnetForm(idx int) tea.Cmd {
 				if v == orig {
 					m.cfg.Pins[k] = tn.Name
 				}
+			}
+			if e := m.cfg.ExitNode; e != nil && strings.EqualFold(e.Tailnet, orig) {
+				e.Tailnet = tn.Name
 			}
 		}
 		m.changed("Updated " + tn.Name + ".")
@@ -481,7 +501,7 @@ func (m *model) listView() string {
 		fmt.Fprintf(&b, "%s%d  %s %s %s %s\n", cur, i+1, name,
 			faint.Render(fmt.Sprintf("%-22s", trunc(control, 22))),
 			faint.Render(fmt.Sprintf("%-9s", auth)),
-			m.statusCell(t.Name, eff.StateDir))
+			m.statusCell(t.Name, filepath.Join(eff.StateDir, t.State)))
 	}
 	b.WriteString("\n")
 	tun := faint.Render("off")
@@ -505,11 +525,11 @@ func (m *model) listView() string {
 	return b.String()
 }
 
-func (m *model) statusCell(name, stateDir string) string {
+func (m *model) statusCell(name, dir string) string {
 	if st, ok := m.daemon[name]; ok {
 		return stateLabel(st)
 	}
-	if _, err := os.Stat(filepath.Join(stateDir, name, "tailscaled.state")); err == nil {
+	if _, err := os.Stat(filepath.Join(dir, "tailscaled.state")); err == nil {
 		return faint.Render("○ logged in before")
 	}
 	return faint.Render("· not joined")
@@ -551,6 +571,40 @@ type loginState struct {
 type loginStartedMsg struct {
 	m   *mux.Mux
 	err error
+}
+
+type loggedOutMsg struct {
+	name string
+	err  error
+}
+
+// logout signs the device out of one tailnet and starts a new login, in
+// the daemon if one runs, else in setup's own tailnets.
+func (m *model) logout(name string) tea.Cmd {
+	addr, x := m.effective().HTTP, m.login.mux
+	viaDaemon := m.login.viaDaemon
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if !viaDaemon {
+			if x == nil {
+				return loggedOutMsg{name, fmt.Errorf("tailnets are still starting")}
+			}
+			return loggedOutMsg{name, x.Logout(ctx, name)}
+		}
+		req, _ := http.NewRequestWithContext(ctx, "POST", "http://"+addr+"/tailnets/"+url.PathEscape(name)+"/logout", nil)
+		req.Header.Set("X-Tailmux", "1")
+		resp, err := (&http.Client{Transport: &http.Transport{Proxy: nil}}).Do(req)
+		if err != nil {
+			return loggedOutMsg{name, err}
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(resp.Body)
+			return loggedOutMsg{name, fmt.Errorf("log out: %s", strings.TrimSpace(string(b)))}
+		}
+		return loggedOutMsg{name: name}
+	}
 }
 
 func (m *model) startLogin() tea.Cmd {
@@ -631,6 +685,10 @@ func (m *model) updateLogin(msg tea.Msg) (tea.Model, tea.Cmd) {
 				l.opened[l.statuses[l.cursor].Name] = true
 			}
 		}
+	case "x":
+		if l.cursor < len(l.statuses) {
+			return m, m.logout(l.statuses[l.cursor].Name)
+		}
 	case "esc", "q", "ctrl+c":
 		l.stop()
 		m.screen = screenList
@@ -697,7 +755,7 @@ func (m *model) loginView() string {
 	} else {
 		b.WriteString(faint.Render("  Each login page belongs to one tailnet: sign in with the account that owns it.") + "\n")
 	}
-	b.WriteString("\n" + faint.Render("  ↑/↓ select · enter open login page · esc back"))
+	b.WriteString("\n" + faint.Render("  ↑/↓ select · enter open login page · x log out · esc back"))
 	return box.Render(b.String())
 }
 

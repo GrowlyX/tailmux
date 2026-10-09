@@ -34,6 +34,7 @@ func (m *Mux) HTTPHandler(socksAddr string) http.Handler {
 	api.HandleFunc("GET /logs", m.serveLogs)
 	api.HandleFunc("POST /tailnets/{name}/{action}", m.serveToggle)
 	api.HandleFunc("/tailnets/{name}/localapi/{path...}", m.serveLocalAPI)
+	api.HandleFunc("POST /tailnets/{name}/logout", m.serveLogout)
 	api.HandleFunc("GET /exit-nodes", m.serveExitNodes)
 	api.HandleFunc("GET /lock", m.serveLock)
 	api.HandleFunc("PUT /exit-node", m.serveSetExitNode)

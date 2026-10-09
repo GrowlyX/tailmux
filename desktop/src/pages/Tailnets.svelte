@@ -7,7 +7,7 @@
   import PillSwitch from "../ui/PillSwitch.svelte";
   import Icon from "../ui/Icon.svelte";
 
-  let confirmName = $state<string | null>(null);
+  let confirm = $state<{ name: string; kind: "remove" | "logout" } | null>(null);
   let menuFor = $state<string | null>(null);
   let addDialog = $state<HTMLDialogElement>();
   let confirmDialog = $state<HTMLDialogElement>();
@@ -19,8 +19,8 @@
   });
   $effect(() => {
     if (!confirmDialog) return;
-    if (confirmName && !confirmDialog.open) confirmDialog.showModal();
-    if (!confirmName && confirmDialog.open) confirmDialog.close();
+    if (confirm && !confirmDialog.open) confirmDialog.showModal();
+    if (!confirm && confirmDialog.open) confirmDialog.close();
   });
 
   function closeAdd() {
@@ -63,7 +63,8 @@
                 {#if t.suffix}<button onclick={() => manager.copy(t.suffix!)}>Copy MagicDNS suffix</button>{/if}
                 {#if t.self_ips?.[0]}<button onclick={() => manager.copy(t.self_ips![0])}>Copy this device's IP</button>{/if}
                 <hr />
-                <button class="danger" onclick={() => (confirmName = t.name)}>Remove…</button>
+                {#if !t.auth_url}<button onclick={() => (confirm = { name: t.name, kind: "logout" })}>Log out…</button>{/if}
+                <button class="danger" onclick={() => (confirm = { name: t.name, kind: "remove" })}>Remove…</button>
               </div>
             {/if}
           </span>
@@ -128,13 +129,22 @@
   </div>
 </dialog>
 
-<dialog bind:this={confirmDialog} onclose={() => (confirmName = null)} oncancel={() => (confirmName = null)}>
+<dialog bind:this={confirmDialog} onclose={() => (confirm = null)} oncancel={() => (confirm = null)}>
   <div class="sheet confirm">
-    <h2>Remove {confirmName}?</h2>
-    <p class="secondary">tailmux leaves this tailnet and forgets it. Its login is kept, so adding it back needs no new login.</p>
+    {#if confirm?.kind === "logout"}
+      <h2>Log out of {confirm.name}?</h2>
+      <p class="secondary">This device leaves the tailnet; you'll need to log in again.</p>
+    {:else}
+      <h2>Remove {confirm?.name}?</h2>
+      <p class="secondary">Removes {confirm?.name} and signs this device out of it. Adding it back needs a new login.</p>
+    {/if}
     <div class="actions">
-      <button class="btn" onclick={() => (confirmName = null)}>Cancel</button>
-      <button class="btn danger" onclick={() => { const n = confirmName!; confirmName = null; void manager.remove(n); }}>Remove</button>
+      <button class="btn" onclick={() => (confirm = null)}>Cancel</button>
+      <button class="btn danger" onclick={() => {
+        const c = confirm!;
+        confirm = null;
+        void (c.kind === "logout" ? manager.logout(c.name) : manager.remove(c.name));
+      }}>{confirm?.kind === "logout" ? "Log out" : "Remove"}</button>
     </div>
   </div>
 </dialog>
