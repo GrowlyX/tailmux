@@ -217,6 +217,11 @@ func (c *Config) NewState(stateDir, name string) (string, error) {
 				return true, nil
 			}
 		}
+		if strings.Contains(s, "..") || validName(s) != "" {
+			// Names are checked before they get here; this keeps the
+			// path inside state_dir regardless.
+			return true, fmt.Errorf("invalid tailnet name %q", s)
+		}
 		_, err := os.Lstat(filepath.Join(stateDir, s))
 		if os.IsNotExist(err) {
 			return false, nil

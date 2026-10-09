@@ -54,6 +54,9 @@ func TestNewStateSkipsOldLogins(t *testing.T) {
 			t.Errorf("%s: %q %v, want %q", name, s, err, want)
 		}
 	}
+	if _, err := c.NewState(dir, "../x"); err == nil {
+		t.Error("a name leaving state_dir: no error")
+	}
 	// An unreadable state_dir is an error, not an endless search.
 	if _, err := c.NewState(filepath.Join(dir, "\x00"), "x"); err == nil {
 		t.Error("unreadable state_dir: no error")
