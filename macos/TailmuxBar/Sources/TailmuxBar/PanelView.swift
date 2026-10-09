@@ -8,7 +8,8 @@ import SwiftUI
 struct PanelView: View {
     @ObservedObject var store: Store
     var snapshot = false
-    @State private var size = CGSize.zero
+    // Not @State: see TailnetRow.
+    @StateObject private var size = Size()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -33,8 +34,8 @@ struct PanelView: View {
         }
         .padding(14)
         .frame(width: 372)
-        .onGeometryChange(for: CGSize.self, of: \.size) { size = $0 }
-        .background(FitWindow(size: size))
+        .onGeometryChange(for: CGSize.self, of: \.size) { size.value = $0 }
+        .background(FitWindow(size: size.value))
         .onAppear { Task { await store.refreshExitNodes() } }
     }
 
@@ -61,6 +62,10 @@ struct PanelView: View {
         }
     }
 
+}
+
+final class Size: ObservableObject {
+    @Published var value = CGSize.zero
 }
 
 /// MenuBarExtra's window keeps its first size, so the panel resizes it when

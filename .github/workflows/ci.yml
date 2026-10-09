@@ -366,6 +366,10 @@ jobs:
         with:
           go-version-file: go.mod
       - name: build app
+        # With only the Command Line Tools, like Homebrew: Xcode ships macro
+        # plugins (e.g. SwiftUI's @State) that the CLT lack.
+        env:
+          DEVELOPER_DIR: /Library/Developer/CommandLineTools
         run: macos/build-app.sh "$PWD/dist" ci
       - name: start lab tailnets and daemon
         run: |
