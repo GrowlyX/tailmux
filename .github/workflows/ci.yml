@@ -31,9 +31,10 @@ jobs:
       - name: builds for every GOOS we claim
         run: |
           for os in linux darwin windows freebsd; do GOOS=$os go build ./... ; done
-      - uses: golang/govulncheck-action@v1
-        with:
-          go-version-file: go.mod
+      # Not golang/govulncheck-action: its own setup-go ignores go.mod's
+      # toolchain line and scans the older Go.
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   test:
     strategy:
