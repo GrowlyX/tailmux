@@ -77,7 +77,7 @@ jobs:
       - run: go test -c -o tun.test ./internal/tun
       - name: TestSystem as root
         if: runner.os != 'Windows'
-        run: sudo TAILMUX_TUN_E2E=1 TAILMUX_TUN_E2E_REQUIRE_DNS=1 ./tun.test -test.run TestSystem -test.v -test.timeout 10m
+        run: sudo TAILMUX_TUN_E2E=1 TAILMUX_TUN_E2E_REQUIRE_DNS=1 ./tun.test -test.run 'TestSystem|TestBypassRules' -test.v -test.timeout 10m
       - name: TestSystem as Administrator (Wintun, NRPT)
         if: runner.os == 'Windows'
         run: |

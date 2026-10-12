@@ -116,6 +116,7 @@ func (s *System) newDevice() (*Engine, error) {
 		eng.routed = s.routed
 	}
 	if err := s.os.up(ifname, s.fake.Gateway(), s.fake.Prefix(), s.cfg.TUN.MTU); err != nil {
+		s.os.close(ifname) // policy rules outlive the link
 		eng.close()
 		return nil, fmt.Errorf("configure %s: %w", ifname, err)
 	}
