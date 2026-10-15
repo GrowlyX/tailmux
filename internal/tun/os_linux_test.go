@@ -39,14 +39,21 @@ func TestBypassRules(t *testing.T) {
 	sh("link", "set", "wan0", "up")
 	sh("addr", "add", "203.0.113.10/24", "dev", "wan0")
 	sh("route", "add", "default", "via", "203.0.113.1", "dev", "wan0")
+	sh("-6", "addr", "add", "2001:db8:1::10/64", "dev", "wan0", "nodad")
+	sh("-6", "route", "add", "default", "via", "2001:db8:1::1", "dev", "wan0")
 	sh("link", "add", "tm0", "type", "dummy")
+	// Another program's rules at our prefs must survive us.
+	for _, fam := range []string{"-4", "-6"} {
+		sh(fam, "rule", "add", "pref", prefBypass, "fwmark", "0x1", "lookup", "main")
+		sh(fam, "rule", "add", "pref", prefBypassDeny, "fwmark", "0x2", "unreachable")
+	}
 
 	l := linuxOS{}
 	if err := l.up("tm0", netip.MustParseAddr("198.18.0.1"), netip.MustParsePrefix("198.18.0.0/15"), 1500); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { l.close("tm0") })
-	for _, p := range []string{"192.0.2.0/24", "100.64.0.10/32"} {
+	for _, p := range []string{"192.0.2.0/24", "100.64.0.10/32", "2001:db8:2::/64", "fd7a:115c:a1e0::10/128"} {
 		if err := l.addRoute("tm0", netip.MustParsePrefix(p)); err != nil {
 			t.Fatal(err)
 		}
@@ -55,6 +62,9 @@ func TestBypassRules(t *testing.T) {
 	// get reports the device a lookup resolves to, or "unreachable".
 	get := func(dst, mark string) string {
 		args := []string{"route", "get", dst}
+		if netip.MustParseAddr(dst).Is6() {
+			args = append([]string{"-6"}, args...)
+		}
 		if mark != "" {
 			args = append(args, "mark", mark)
 		}
@@ -87,7 +97,13 @@ func TestBypassRules(t *testing.T) {
 		check(state+" tsnet to internet", "1.1.1.1", tsnet, "wan0")
 		check(state+" tsnet to local net", "203.0.113.50", tsnet, "wan0")
 		// Other marks (a VPN's own) are none of our business.
-		check(state+" other mark to subnet", "192.0.2.5", "0x1", "tm0")
+		check(state+" other mark to subnet", "192.0.2.5", "0x3", "tm0")
+		// The same over IPv6.
+		check(state+" app to subnet (IPv6)", "2001:db8:2::5", "", "tm0")
+		check(state+" app to peer (IPv6)", "fd7a:115c:a1e0::10", "", "tm0")
+		check(state+" tsnet to subnet (IPv6)", "2001:db8:2::5", tsnet, "unreachable")
+		check(state+" tsnet to peer (IPv6)", "fd7a:115c:a1e0::10", tsnet, "unreachable")
+		check(state+" tsnet to internet (IPv6)", "2606:4700::1111", tsnet, "wan0")
 	}
 	verify("tun")
 
@@ -105,14 +121,25 @@ func TestBypassRules(t *testing.T) {
 	if err := l.up("tm0", netip.MustParseAddr("198.18.0.1"), netip.MustParsePrefix("198.18.0.0/15"), 1500); err != nil {
 		t.Fatal(err)
 	}
-	out, _ := exec.Command("ip", "rule", "show", "pref", prefBypass).Output()
-	if n := strings.Count(string(out), "\n"); n != 1 {
-		t.Errorf("%d bypass rules after a second up, want 1:\n%s", n, out)
+	for _, fam := range []string{"-4", "-6"} {
+		for _, pref := range []string{prefBypass, prefBypassDeny} {
+			out, _ := exec.Command("ip", fam, "rule", "show", "pref", pref).Output()
+			if n := strings.Count(string(out), "\n"); n != 2 { // ours and the other program's
+				t.Errorf("ip %s: %d rules at pref %s after a second up, want 2:\n%s", fam, n, pref, out)
+			}
+		}
 	}
 
 	l.close("tm0")
-	out, _ = exec.Command("ip", "rule", "show").Output()
-	if strings.Contains(string(out), "suppress_ifgroup") || strings.Contains(string(out), "unreachable") {
-		t.Errorf("rules left after close:\n%s", out)
+	for _, fam := range []string{"-4", "-6"} {
+		out, _ := exec.Command("ip", fam, "rule", "show").Output()
+		if strings.Contains(string(out), "suppress_ifgroup") || strings.Contains(string(out), "0x80000/0xff0000") {
+			t.Errorf("ip %s: rules left after close:\n%s", fam, out)
+		}
+		for _, other := range []string{"fwmark 0x1 lookup main", "fwmark 0x2 unreachable"} {
+			if !strings.Contains(string(out), other) {
+				t.Errorf("ip %s: another program's rule %q removed:\n%s", fam, other, out)
+			}
+		}
 	}
 }

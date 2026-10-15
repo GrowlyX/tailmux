@@ -61,31 +61,42 @@ const (
 	tunGroup       = "7280"
 )
 
+// bypassRules are the two rules setBypass adds, spelled out in full so
+// clearBypass deletes only ours, not another program's rule at the same
+// pref.
+var bypassRules = [][]string{
+	{"pref", prefBypass, "fwmark", bypassMark, "lookup", "main", "suppress_ifgroup", tunGroup},
+	{"pref", prefBypassDeny, "fwmark", bypassMark, "unreachable"},
+}
+
 // setBypass keeps marked sockets out of the TUN. If the kernel or iproute2
 // lack suppress_ifgroup, the loop above can come back; nothing else breaks.
-func (linuxOS) setBypass(ifname string) {
+func (l linuxOS) setBypass(ifname string) {
 	if err := run("ip", "link", "set", "dev", ifname, "group", tunGroup); err != nil {
 		log.Printf("tun: interface group: %v", err)
 		return
 	}
 	for _, fam := range []string{"-4", "-6"} {
-		err := errors.Join(
-			run("ip", fam, "rule", "add", "pref", prefBypass, "fwmark", bypassMark, "lookup", "main", "suppress_ifgroup", tunGroup),
-			run("ip", fam, "rule", "add", "pref", prefBypassDeny, "fwmark", bypassMark, "unreachable"),
-		)
-		if err != nil {
+		var errs []error
+		for _, r := range bypassRules {
+			errs = append(errs, run("ip", append([]string{fam, "rule", "add"}, r...)...))
+		}
+		if err := errors.Join(errs...); err != nil {
 			log.Printf("tun: keeping tsnet sockets out of the TUN%s: %v", map[string]string{"-4": "", "-6": " (IPv6)"}[fam], err)
-			exec.Command("ip", fam, "rule", "del", "pref", prefBypass).Run()
-			exec.Command("ip", fam, "rule", "del", "pref", prefBypassDeny).Run()
+			l.clearBypassFam(fam)
 		}
 	}
 }
 
-func (linuxOS) clearBypass() {
-	for _, fam := range []string{"-4", "-6"} {
-		for _, pref := range []string{prefBypass, prefBypassDeny} {
-			for i := 0; i < 8 && exec.Command("ip", fam, "rule", "del", "pref", pref).Run() == nil; i++ {
-			}
+func (l linuxOS) clearBypass() {
+	l.clearBypassFam("-4")
+	l.clearBypassFam("-6")
+}
+
+func (linuxOS) clearBypassFam(fam string) {
+	for _, r := range bypassRules {
+		args := append([]string{fam, "rule", "del"}, r...)
+		for i := 0; i < 8 && exec.Command("ip", args...).Run() == nil; i++ {
 		}
 	}
 }
