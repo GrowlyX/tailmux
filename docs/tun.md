@@ -92,6 +92,13 @@ Lookups get a "try again" answer rather than a cached "doesn't exist".
 
 If anything ever looks stale, `tailmux repair` does the same by hand.
 
+On Linux, tailmux's own sockets (fwmark `0x80000`) never use routes into
+`tailmux0`, through two rules at 5205 and 5206 (alongside `tailscaled`'s
+5210-5270). Otherwise a subnet router's LAN address, offered by the router
+itself as a WireGuard endpoint, would send a tailnet's own packets into the
+TUN and back out as new ones, in a loop that burned CPU without leaving the
+machine.
+
 ## Limits
 
 - On Linux and Windows, bare hostnames like `db` still need a suffix in TUN
