@@ -99,5 +99,6 @@ signing device, and use what it prints as that tailnet's `auth_key`.
 | `tun.real_ips` | `true` | Answer names with real `100.x` addresses unless another tailnet uses the same one ([why](tun.md#why-does-a-name-resolve-to-19818xx)) |
 | `tun.fake_range` | `198.18.0.0/15` | Where fake IPs come from, for addresses several tailnets use |
 | `tun.name` / `tun.mtu` / `tun.no_dns` | auto / 1500 / false | |
+| `tun.resolv_conf` | `false` | Linux without systemd-resolved: point `/etc/resolv.conf` at tailmux ([TUN mode](tun.md#linux-without-systemd-resolved)) |
 | `updates.check` | `true` | Check GitHub for releases ([updates](updates.md)) |
 | `updates.auto` | `true` | Install them and restart; `false` only notifies |

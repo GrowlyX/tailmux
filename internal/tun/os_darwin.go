@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"tailscale.com/util/dnsname"
+
+	"github.com/GrowlyX/tailmux/internal/mux"
 )
 
 const defaultTUNName = "utun"
@@ -40,7 +42,7 @@ type scopedDefault struct {
 	family, gateway, ifname string
 }
 
-func newOSConfig() (osConfig, error) {
+func newOSConfig(mux.TUNConfig) (osConfig, error) {
 	d := &darwinOS{}
 	d.removeResolvers() // leftovers from a crash
 	return d, nil

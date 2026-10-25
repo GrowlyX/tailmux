@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/GrowlyX/tailmux/internal/mux"
 )
 
 // fakeRouteTable stands in for /sbin/route, keyed by everything after
@@ -155,7 +157,7 @@ func TestDarwinSearchDomains(t *testing.T) {
 		t.Fatal("search file left behind on close")
 	}
 	set([]string{"work"}, []string{"work"})
-	if _, err := newOSConfig(); err != nil {
+	if _, err := newOSConfig(mux.TUNConfig{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {

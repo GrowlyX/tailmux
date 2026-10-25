@@ -2,10 +2,14 @@
 
 package tun
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/GrowlyX/tailmux/internal/mux"
+)
 
 var errUnsupported = errors.New("tun mode is only supported on macOS and Linux")
 
 const defaultTUNName = "tun"
 
-func newOSConfig() (osConfig, error) { return nil, errUnsupported }
+func newOSConfig(mux.TUNConfig) (osConfig, error) { return nil, errUnsupported }

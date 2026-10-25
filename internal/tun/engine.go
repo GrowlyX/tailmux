@@ -46,7 +46,10 @@ type Engine struct {
 	// names whose real addresses are, and that no other tailnet claims,
 	// are answered with those instead of a fake IP. Nil: always fake.
 	routed func(ip netip.Addr) bool
-	mtu    int
+	// upstreams, if set, lists the nameservers for names no tailnet
+	// claims, when the OS sends every lookup here (/etc/resolv.conf).
+	upstreams func() []netip.AddrPort
+	mtu       int
 
 	s  *stack.Stack
 	ep *channel.Endpoint
@@ -239,6 +242,18 @@ func (e *Engine) target(dst netip.Addr, port uint16) (string, bool) {
 
 func (e *Engine) acceptTCP(r *tcp.ForwarderRequest) {
 	id := r.ID()
+	if addrOf(id.LocalAddress) == e.fake.DNS() && id.LocalPort == 53 {
+		// Resolvers retry over TCP when an answer is truncated.
+		var wq waiter.Queue
+		ep, terr := r.CreateEndpoint(&wq)
+		if terr != nil {
+			r.Complete(true)
+			return
+		}
+		r.Complete(false)
+		e.serveDNSTCP(gonet.NewTCPConn(&wq, ep))
+		return
+	}
 	addr, ok := e.target(addrOf(id.LocalAddress), id.LocalPort)
 	if !ok {
 		r.Complete(true)
@@ -332,17 +347,89 @@ func (e *Engine) serveDNS(c *gonet.UDPConn) {
 		if err != nil {
 			return
 		}
-		if resp := e.answerDNS(buf[:n]); resp != nil {
+		if resp := e.answerDNS(buf[:n], "udp"); resp != nil {
 			c.Write(resp)
 		}
 	}
 }
 
+// serveDNSTCP answers length-prefixed queries on one connection.
+func (e *Engine) serveDNSTCP(c net.Conn) {
+	defer c.Close()
+	for {
+		c.SetDeadline(time.Now().Add(30 * time.Second))
+		q, err := readDNSTCP(c)
+		if err != nil {
+			return
+		}
+		resp := e.answerDNS(q, "tcp")
+		if resp == nil || writeDNSTCP(c, resp) != nil {
+			return
+		}
+	}
+}
+
+func readDNSTCP(r io.Reader) ([]byte, error) {
+	var n [2]byte
+	if _, err := io.ReadFull(r, n[:]); err != nil {
+		return nil, err
+	}
+	b := make([]byte, int(n[0])<<8|int(n[1]))
+	_, err := io.ReadFull(r, b)
+	return b, err
+}
+
+func writeDNSTCP(w io.Writer, msg []byte) error {
+	_, err := w.Write(append([]byte{byte(len(msg) >> 8), byte(len(msg))}, msg...))
+	return err
+}
+
+// forwardDNS passes a query unchanged to the first upstream that
+// answers, over network ("udp" or "tcp"). A truncated UDP answer goes
+// back as it is; the client then asks again over TCP.
+func forwardDNS(query []byte, network string, upstreams []netip.AddrPort) []byte {
+	if len(query) < 2 {
+		return nil
+	}
+	for _, up := range upstreams {
+		c, err := net.DialTimeout(network, up.String(), 2*time.Second)
+		if err != nil {
+			continue
+		}
+		c.SetDeadline(time.Now().Add(4 * time.Second))
+		var resp []byte
+		if network == "tcp" {
+			if err = writeDNSTCP(c, query); err == nil {
+				resp, err = readDNSTCP(c)
+			}
+		} else if _, err = c.Write(query); err == nil {
+			buf := make([]byte, 65535)
+			for {
+				var n int
+				if n, err = c.Read(buf); err != nil {
+					break
+				}
+				if n >= 2 && buf[0] == query[0] && buf[1] == query[1] { // same ID
+					resp = buf[:n]
+					break
+				}
+			}
+		}
+		c.Close()
+		if err == nil {
+			return resp
+		}
+	}
+	return nil
+}
+
 // answerDNS answers tailnet names with their real addresses when those
 // are unambiguous, else with a fake address (see addrsFor). Names that
 // don't exist get NXDOMAIN, checked against the owning tailnet's own
-// resolver. With an exit node, other names get their real addresses.
-func (e *Engine) answerDNS(query []byte) []byte {
+// resolver. With an exit node, other names get their real addresses;
+// when the OS sends every lookup here, other names go to its upstream
+// nameservers.
+func (e *Engine) answerDNS(query []byte, network string) []byte {
 	var p dnsmessage.Parser
 	h, err := p.Start(query)
 	if err != nil {
@@ -409,6 +496,14 @@ func (e *Engine) answerDNS(query []byte) []byte {
 		}
 		// Other types get an empty answer: not NXDOMAIN, which resolvers
 		// would apply to the name's A records too.
+	} else if e.upstreams != nil {
+		if ups := e.upstreams(); len(ups) > 0 {
+			if resp := forwardDNS(query, network, ups); resp != nil {
+				return resp
+			}
+			rh.Authoritative = false
+			rh.RCode = dnsmessage.RCodeServerFailure
+		}
 	}
 	b := dnsmessage.NewBuilder(nil, rh)
 	b.EnableCompression()

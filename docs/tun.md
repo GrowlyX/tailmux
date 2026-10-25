@@ -10,7 +10,8 @@ tailmux then:
 - points the OS resolver at itself for tailnet domains only. That covers the
   tailnet names, the MagicDNS suffixes and the split-DNS domains, using
   `/etc/resolver/<domain>` on macOS and systemd-resolved routing domains on
-  Linux;
+  Linux (or [`/etc/resolv.conf`](#linux-without-systemd-resolved), if you
+  opt in);
 - routes every tailnet device's own address (one /32 each) into the TUN, so a
   name in ordinary DNS that points at a device (`grafana.example.com →
   100.101.102.103`) works too;
@@ -76,6 +77,29 @@ If several tailnets claim it, it goes to the one `tailmux resolve` shows.
 A name also gets a fake IP when its real address isn't routed into the TUN,
 for example because it overlaps your LAN or because `"peer_routes": false`.
 Set `"tun": {"real_ips": false}` to always use fake IPs.
+
+## Linux without systemd-resolved
+
+`/etc/resolv.conf` can't send only some domains to one server, so by
+default tailmux leaves it alone when systemd-resolved isn't running, and
+tailnet names don't resolve from a terminal. Set
+`"tun": {"resolv_conf": true}` to have tailmux take the file over:
+
+- the original is moved to `/etc/resolv.pre-tailmux-backup.conf` (a
+  symlink stays a symlink) and the new file lists only tailmux's resolver,
+  keeping the original `search` and `options` lines;
+- tailmux answers tailnet names and forwards every other lookup, over UDP
+  or TCP, to the nameservers the original lists. If a program such as
+  NetworkManager or a DHCP client writes the file again, the new one
+  becomes the original within a few minutes;
+- the original comes back when tailmux stops, when no tailnet is running,
+  or at the next start after a crash. If systemd-resolved starts later,
+  tailmux switches to it.
+
+Like the official client's own last resort, this means every lookup on the
+machine goes through tailmux while it runs. If it is killed and never
+restarted, move the backup back by hand:
+`sudo mv /etc/resolv.pre-tailmux-backup.conf /etc/resolv.conf`.
 
 ## Sleep, wake and changing networks
 
