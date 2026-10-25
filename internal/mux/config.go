@@ -65,6 +65,10 @@ type TUNConfig struct {
 	// other tailnet uses the same ones; false always hands out fake IPs.
 	// Default true.
 	RealIPs *bool `json:"real_ips,omitempty"`
+	// ResolvConf points /etc/resolv.conf at tailmux on Linux systems
+	// without systemd-resolved, forwarding other names to the original
+	// nameservers. The original comes back when tailmux stops.
+	ResolvConf bool `json:"resolv_conf,omitempty"`
 }
 
 // ExitNodeConfig picks an exit node: a device in one of the tailnets

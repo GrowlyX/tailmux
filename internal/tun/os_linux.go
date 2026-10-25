@@ -8,13 +8,28 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/GrowlyX/tailmux/internal/mux"
 )
 
 const defaultTUNName = "tailmux0"
 
-type linuxOS struct{}
+type linuxOS struct {
+	// rc, if set, points /etc/resolv.conf at tailmux when
+	// systemd-resolved isn't running.
+	rc *resolvConf
+}
 
-func newOSConfig() (osConfig, error) { return linuxOS{}, nil }
+func newOSConfig(cfg mux.TUNConfig) (osConfig, error) {
+	rc := newResolvConf("/etc/resolv.conf")
+	if err := rc.restore(); err != nil { // left over from a crash
+		log.Printf("tun: restore /etc/resolv.conf: %v", err)
+	}
+	if !cfg.ResolvConf {
+		rc = nil
+	}
+	return linuxOS{rc: rc}, nil
+}
 
 func (l linuxOS) up(ifname string, gw netip.Addr, fake netip.Prefix, mtu int) error {
 	l.clearExit() // left over from a crash
@@ -172,11 +187,21 @@ func (linuxOS) clearExit() {
 }
 
 // setDNS uses systemd-resolved's per-link routing domains ("~dom"), so
-// only tailnet names come here (every name, "~.", with an exit node). Without resolved there is no standard
-// per-domain mechanism, and tailmux leaves /etc/resolv.conf alone.
-func (linuxOS) setDNS(ifname string, domains, _ []string, server netip.Addr) (bool, error) {
+// only tailnet names come here (every name, "~.", with an exit node).
+// Without resolved there is no standard per-domain mechanism: tailmux
+// leaves /etc/resolv.conf alone unless told to take it over (resolvConf).
+func (l linuxOS) setDNS(ifname string, domains, _ []string, server netip.Addr) (bool, error) {
 	if !resolvedRunning() {
-		return false, nil
+		if l.rc == nil {
+			return false, nil
+		}
+		if len(domains) == 0 {
+			return false, l.rc.restore()
+		}
+		return true, l.rc.set(server)
+	}
+	if l.rc != nil {
+		l.rc.restore() // resolved started since
 	}
 	if err := run("resolvectl", "dns", ifname, server.String()); err != nil {
 		return false, err
@@ -198,12 +223,24 @@ func (linuxOS) setDNS(ifname string, domains, _ []string, server netip.Addr) (bo
 	return true, nil
 }
 
-func (linuxOS) dnsIntact(ifname string, domains, _ []string) bool {
-	if !resolvedRunning() || len(domains) == 0 {
+func (l linuxOS) dnsIntact(ifname string, domains, _ []string) bool {
+	if len(domains) == 0 {
 		return true
+	}
+	if !resolvedRunning() {
+		return l.rc == nil || l.rc.intact()
 	}
 	out, err := exec.Command("resolvectl", "domain", ifname).CombinedOutput()
 	return err == nil && strings.Contains(string(out), "~"+domains[0])
+}
+
+// dnsUpstreams are the nameservers to forward other names to while
+// /etc/resolv.conf sends every lookup to tailmux.
+func (l linuxOS) dnsUpstreams() []netip.AddrPort {
+	if l.rc == nil {
+		return nil
+	}
+	return l.rc.dnsUpstreams()
 }
 
 func (linuxOS) flushDNS() {
@@ -227,6 +264,9 @@ func (l linuxOS) close(ifname string) error {
 	l.clearBypass()
 	if resolvedRunning() {
 		exec.Command("resolvectl", "revert", ifname).Run()
+	}
+	if l.rc != nil {
+		return l.rc.restore()
 	}
 	return nil
 }

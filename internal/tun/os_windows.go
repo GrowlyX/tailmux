@@ -13,6 +13,8 @@ import (
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
+
+	"github.com/GrowlyX/tailmux/internal/mux"
 )
 
 // The Wintun adapter's name. wintun.dll must sit next to tailmux.exe;
@@ -21,7 +23,7 @@ const defaultTUNName = "tailmux"
 
 type windowsOS struct{}
 
-func newOSConfig() (osConfig, error) {
+func newOSConfig(mux.TUNConfig) (osConfig, error) {
 	w := windowsOS{}
 	w.removeNRPT() // leftovers from a crash
 	return w, nil

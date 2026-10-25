@@ -230,6 +230,31 @@ func TestEngine(t *testing.T) {
 		}
 	})
 
+	t.Run("DNS over TCP", func(t *testing.T) {
+		c, err := dialTCP(fake.DNS(), 53)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+		b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: 9, RecursionDesired: true})
+		b.StartQuestions()
+		b.Question(dnsmessage.Question{Name: dnsmessage.MustNewName("web.alpha."), Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET})
+		q, _ := b.Finish()
+		c.SetDeadline(time.Now().Add(10 * time.Second))
+		if err := writeDNSTCP(c, q); err != nil {
+			t.Fatal(err)
+		}
+		resp, err := readDNSTCP(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var p dnsmessage.Parser
+		h, err := p.Start(resp)
+		if err != nil || h.ID != 9 || h.RCode != dnsmessage.RCodeSuccess {
+			t.Fatalf("web.alpha over TCP: %+v %v", h, err)
+		}
+	})
+
 	t.Run("NXDOMAIN for names nobody has", func(t *testing.T) {
 		for _, n := range []string{"nosuchhost.bravo.", "example.com.", "nope.bravo.example.ts.net."} {
 			if ip, rc := lookup(n); rc != dnsmessage.RCodeNameError {

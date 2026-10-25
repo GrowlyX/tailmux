@@ -68,7 +68,7 @@ type System struct {
 // Start creates the TUN device and starts routing tailnet traffic
 // through it. It needs root.
 func Start(ctx context.Context, m *mux.Mux, cfg *mux.Config) (*System, error) {
-	osc, err := newOSConfig()
+	osc, err := newOSConfig(cfg.TUN)
 	if err != nil {
 		return nil, err
 	}
@@ -114,6 +114,9 @@ func (s *System) newDevice() (*Engine, error) {
 	}
 	if s.cfg.TUN.RealIPs == nil || *s.cfg.TUN.RealIPs {
 		eng.routed = s.routed
+	}
+	if f, ok := s.os.(interface{ dnsUpstreams() []netip.AddrPort }); ok {
+		eng.upstreams = f.dnsUpstreams
 	}
 	if err := s.os.up(ifname, s.fake.Gateway(), s.fake.Prefix(), s.cfg.TUN.MTU); err != nil {
 		s.os.close(ifname) // policy rules outlive the link
