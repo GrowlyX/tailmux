@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -155,6 +156,64 @@ func TestResolvConf(t *testing.T) {
 		if got := read(); got != origResolvConf {
 			t.Errorf("after crash cleanup:\n%s", got)
 		}
+	})
+
+	t.Run("an unreadable original stays", func(t *testing.T) {
+		os.Remove(path)
+		os.Symlink("not-there-yet.conf", path)
+		r := newResolvConf(path)
+		if err := r.set(server); err == nil {
+			t.Fatal("took over a resolv.conf it couldn't read")
+		}
+		if l, err := os.Readlink(path); err != nil || l != "not-there-yet.conf" {
+			t.Fatalf("symlink touched: %q %v", l, err)
+		}
+		if _, err := os.Lstat(r.backup); !os.IsNotExist(err) {
+			t.Error("backup made")
+		}
+		os.Remove(path)
+	})
+
+	t.Run("a failed write puts the original back", func(t *testing.T) {
+		os.WriteFile(path, []byte(origResolvConf), 0o644)
+		r := newResolvConf(path)
+		defer func() { writeResolvConf = replaceFile }()
+		// An in-place write (bind mount) that fails after truncating.
+		writeResolvConf = func(p string, _ []byte) error {
+			os.WriteFile(p, nil, 0o644)
+			return syscall.EIO
+		}
+		if err := r.set(server); err == nil {
+			t.Fatal("no error")
+		}
+		if got := read(); got != origResolvConf {
+			t.Errorf("after a failed write:\n%s", got)
+		}
+		if _, err := os.Lstat(r.backup); !os.IsNotExist(err) {
+			t.Error("backup left behind")
+		}
+		if r.dnsUpstreams() != nil {
+			t.Error("upstreams set")
+		}
+	})
+
+	t.Run("a vanished symlink target on repair", func(t *testing.T) {
+		target := filepath.Join(dir, "managed.conf")
+		os.WriteFile(target, []byte(origResolvConf), 0o644)
+		os.Remove(path)
+		os.Symlink("managed.conf", path)
+		r := newResolvConf(path)
+		if err := r.set(server); err != nil {
+			t.Fatal(err)
+		}
+		os.Remove(target)
+		if err := r.set(server); err == nil {
+			t.Fatal("kept pointing at tailmux with no upstreams")
+		}
+		if l, err := os.Readlink(path); err != nil || l != "managed.conf" {
+			t.Fatalf("symlink not put back: %q %v", l, err)
+		}
+		os.Remove(path)
 	})
 
 	t.Run("no original", func(t *testing.T) {

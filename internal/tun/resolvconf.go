@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -41,10 +42,15 @@ func ownResolvConf(b []byte) bool { return bytes.HasPrefix(b, []byte(resolvConfM
 func (r *resolvConf) set(server netip.Addr) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	cur, _ := os.ReadFile(r.path)
+	cur, readErr := os.ReadFile(r.path)
 	if _, err := os.Lstat(r.path); err == nil && !ownResolvConf(cur) {
 		// The system's file, or one written over ours since: that is the
-		// original now.
+		// original now. One we can't read (a symlink to a file that isn't
+		// there yet) stays: without its nameservers, every other name
+		// would fail.
+		if readErr != nil {
+			return fmt.Errorf("read %s: %w", r.path, readErr)
+		}
 		err := os.Rename(r.path, r.backup)
 		if errors.Is(err, syscall.EBUSY) {
 			err = writeFileAtomic(r.backup, cur) // a bind mount (containers)
@@ -53,7 +59,13 @@ func (r *resolvConf) set(server netip.Addr) error {
 			return fmt.Errorf("back up %s: %w", r.path, err)
 		}
 	}
-	orig, _ := os.ReadFile(r.backup) // follows a symlink, so it stays current
+	var orig []byte
+	if _, err := os.Lstat(r.backup); err == nil {
+		// Read each time: through a symlink, it stays current.
+		if orig, err = os.ReadFile(r.backup); err != nil {
+			return errors.Join(fmt.Errorf("read %s: %w", r.backup, err), r.putBackLocked())
+		}
+	}
 	upstreams, keep := parseResolvConf(orig, server)
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s; the original is %s and comes back when tailmux stops.\n", resolvConfMarker, r.backup)
@@ -62,9 +74,9 @@ func (r *resolvConf) set(server netip.Addr) error {
 	for _, l := range keep {
 		b.WriteString(l + "\n")
 	}
-	if err := replaceFile(r.path, []byte(b.String())); err != nil {
-		r.restoreLocked() // never leave the system without a resolver
-		return err
+	if err := writeResolvConf(r.path, []byte(b.String())); err != nil {
+		// Never leave the system without a resolver.
+		return errors.Join(err, r.putBackLocked())
 	}
 	r.server, r.upstreams = server, upstreams
 	return nil
@@ -96,8 +108,11 @@ func (r *resolvConf) restore() error {
 
 func (r *resolvConf) restoreLocked() error {
 	r.upstreams = nil
-	cur, _ := os.ReadFile(r.path)
+	cur, readErr := os.ReadFile(r.path)
 	_, curErr := os.Lstat(r.path)
+	if curErr == nil && readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
+		return fmt.Errorf("read %s: %w", r.path, readErr) // can't tell whose it is
+	}
 	_, bakErr := os.Lstat(r.backup)
 	switch {
 	case curErr == nil && !ownResolvConf(cur):
@@ -106,19 +121,36 @@ func (r *resolvConf) restoreLocked() error {
 		}
 		return nil
 	case bakErr == nil:
-		err := os.Rename(r.backup, r.path)
-		if errors.Is(err, syscall.EBUSY) {
-			b, rerr := os.ReadFile(r.backup)
-			if err = errors.Join(rerr, replaceFile(r.path, b)); err == nil {
-				err = os.Remove(r.backup)
-			}
-		}
-		return err
+		return r.moveBackLocked()
 	case curErr == nil:
 		// Ours, and there was no original.
 		return os.Remove(r.path)
 	}
 	return nil
+}
+
+// putBackLocked undoes a takeover that failed partway. Whatever the file
+// holds now (possibly nothing, after a failed in-place write) is ours.
+func (r *resolvConf) putBackLocked() error {
+	r.upstreams = nil
+	if _, err := os.Lstat(r.backup); err == nil {
+		return r.moveBackLocked()
+	}
+	if err := os.Remove(r.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func (r *resolvConf) moveBackLocked() error {
+	err := os.Rename(r.backup, r.path)
+	if errors.Is(err, syscall.EBUSY) {
+		b, rerr := os.ReadFile(r.backup)
+		if err = errors.Join(rerr, replaceFile(r.path, b)); err == nil {
+			err = os.Remove(r.backup)
+		}
+	}
+	return err
 }
 
 // parseResolvConf returns the nameservers in a resolv.conf other than
@@ -142,6 +174,9 @@ func parseResolvConf(b []byte, self netip.Addr) (upstreams []netip.AddrPort, kee
 	}
 	return upstreams, keep
 }
+
+// writeResolvConf is replaceFile, swapped out by tests.
+var writeResolvConf = replaceFile
 
 // replaceFile writes path atomically or, where it is a bind mount that
 // can't be renamed over (containers), in place.
