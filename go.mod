@@ -1,8 +1,6 @@
 module github.com/GrowlyX/tailmux
 
-go 1.27.1
-
-toolchain go1.27.3
+go 1.27.3
 
 require (
 	charm.land/bubbletea/v2 v2.1.0
@@ -14,7 +12,7 @@ require (
 	golang.org/x/sys v0.49.0
 	golang.zx2c4.com/wireguard/windows v1.1.1
 	gvisor.dev/gvisor v0.0.0-20260915211658-a6f909f08a72
-	tailscale.com v1.104.1
+	tailscale.com v1.104.2
 )
 
 require (
