@@ -213,7 +213,7 @@ func TestStatusDoesNotWaitForRouteWork(t *testing.T) {
 	s.publishState()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	done := make(chan systemState)
+	done := make(chan systemState, 1)
 	go func() { done <- systemState{s.Interface(), s.DNSActive(), s.ExitActive()} }()
 	select {
 	case got := <-done:
@@ -222,5 +222,21 @@ func TestStatusDoesNotWaitForRouteWork(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("status waited for the route lock")
+	}
+}
+
+func TestStatusFollowsDNSAndDeviceClose(t *testing.T) {
+	s := lifecycleSystem(t, &recordingOS{})
+	dev := &systemDevice{Device: tuntest.NewChannelTUN().TUN(), system: s}
+	s.dev = dev
+	s.reconcile(true)
+	if !s.DNSActive() || s.Interface() != s.ifname {
+		t.Fatalf("after DNS set: dns=%v interface=%q, want true %q", s.DNSActive(), s.Interface(), s.ifname)
+	}
+	if err := dev.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if s.DNSActive() {
+		t.Fatal("DNS still reported active after the device closed")
 	}
 }
