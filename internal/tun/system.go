@@ -56,6 +56,7 @@ type System struct {
 	closeErr      error
 	routes        map[netip.Prefix]bool
 	routedNow     atomic.Pointer[[]netip.Prefix] // routes, for DNS answers without s.mu
+	stateNow      atomic.Pointer[systemState]    // for status reads while s.mu is busy with route work
 	domains       []string
 	searchDomains []string
 	dnsActive     bool
@@ -63,6 +64,12 @@ type System struct {
 	skipped       map[netip.Prefix]bool
 	cancel        context.CancelFunc
 	done          chan struct{}
+}
+
+type systemState struct {
+	ifname    string
+	dnsActive bool
+	exit      bool
 }
 
 // Start creates the TUN device and starts routing tailnet traffic
@@ -128,6 +135,7 @@ func (s *System) newDevice() (*Engine, error) {
 	owned := &systemDevice{Device: dev, system: s}
 	eng.dev = owned
 	s.dev, s.ifname = owned, ifname
+	s.publishState()
 	return eng, nil
 }
 
@@ -146,6 +154,7 @@ func (d *systemDevice) Close() error {
 	s.dev = nil
 	s.dnsActive = false
 	s.exit = false
+	s.publishState()
 	s.domains = nil
 	s.routedNow.Store(nil)
 	s.searchDomains = nil
@@ -320,18 +329,25 @@ func netFingerprint(skip string) string {
 // Interface is the current device's name. It changes if the device is
 // recreated.
 func (s *System) Interface() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.ifname
+	return s.state().ifname
 }
 
 func (s *System) FakeIPs() *FakeIPs { return s.fake }
 
 // DNSActive reports whether the OS resolver sends tailnet domains here.
 func (s *System) DNSActive() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.dnsActive
+	return s.state().dnsActive
+}
+
+func (s *System) state() systemState {
+	if st := s.stateNow.Load(); st != nil {
+		return *st
+	}
+	return systemState{}
+}
+
+func (s *System) publishState() {
+	s.stateNow.Store(&systemState{ifname: s.ifname, dnsActive: s.dnsActive, exit: s.exit})
 }
 
 // reconcile makes the OS routes and DNS domains match what the running
@@ -426,6 +442,7 @@ func (s *System) reconcileLocked(force bool) {
 			log.Printf("tun: %s", map[bool]string{true: "routing all traffic through the exit node", false: "exit node off; routing tailnet traffic only"}[exit])
 		}
 		s.exit = exit
+		s.publishState()
 	}
 	if exit {
 		domains = append(slices.Clone(domains), ".")
@@ -440,6 +457,7 @@ func (s *System) reconcileLocked(force bool) {
 	}
 	searchChanged := !slices.Equal(searchDomains, s.searchDomains)
 	s.domains, s.searchDomains, s.dnsActive = domains, searchDomains, ok
+	s.publishState()
 	if ok && searchChanged {
 		s.os.flushDNS()
 	}
@@ -461,9 +479,7 @@ func localPrefixes(skip string) []netip.Prefix { return mux.LocalPrefixes(skip) 
 // ExitActive reports whether all traffic is being routed into the TUN
 // for an exit node.
 func (s *System) ExitActive() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.exit
+	return s.state().exit
 }
 
 func overlapsAny(p netip.Prefix, list []netip.Prefix) bool {

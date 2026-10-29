@@ -206,3 +206,21 @@ func TestReconcileSearchDomains(t *testing.T) {
 	}
 	s.dev.Close()
 }
+
+func TestStatusDoesNotWaitForRouteWork(t *testing.T) {
+	s := lifecycleSystem(t, &recordingOS{})
+	s.dnsActive, s.exit = true, true
+	s.publishState()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	done := make(chan systemState)
+	go func() { done <- systemState{s.Interface(), s.DNSActive(), s.ExitActive()} }()
+	select {
+	case got := <-done:
+		if want := (systemState{s.ifname, true, true}); got != want {
+			t.Fatalf("status = %+v, want %+v", got, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("status waited for the route lock")
+	}
+}
