@@ -98,9 +98,10 @@ func TestDarwinPin(t *testing.T) {
 }
 
 func TestDarwinSearchDomains(t *testing.T) {
-	old := resolverDir
+	old, oldRC := resolverDir, resolvConfPath
 	resolverDir = t.TempDir()
-	t.Cleanup(func() { resolverDir = old })
+	resolvConfPath = filepath.Join(t.TempDir(), "resolv.conf")
+	t.Cleanup(func() { resolverDir, resolvConfPath = old, oldRC })
 	d := darwinOS{}
 	server := netip.MustParseAddr("198.18.0.53")
 	path := filepath.Join(resolverDir, searchResolverFile)
@@ -183,6 +184,90 @@ func TestDarwinSearchDomains(t *testing.T) {
 		if _, err := d.setDNS("utun9", nil, []string{search}, server); err == nil {
 			t.Fatalf("accepted unsafe search suffix %q", search)
 		}
+	}
+}
+
+// TestDarwinResolvConf takes over a symlinked /etc/resolv.conf, as
+// macOS has it, and puts the symlink back.
+func TestDarwinResolvConf(t *testing.T) {
+	old, oldRC := resolverDir, resolvConfPath
+	resolverDir = t.TempDir()
+	etc, run := t.TempDir(), t.TempDir()
+	resolvConfPath = filepath.Join(etc, "resolv.conf")
+	t.Cleanup(func() { resolverDir, resolvConfPath = old, oldRC })
+	target := filepath.Join(run, "resolv.conf")
+	if err := os.WriteFile(target, []byte("search lan\nnameserver 192.168.1.1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, resolvConfPath); err != nil {
+		t.Fatal(err)
+	}
+	server := netip.MustParseAddr("198.18.0.53")
+	domains := []string{"home", "ts.net"}
+
+	o, err := newOSConfig(mux.TUNConfig{ResolvConf: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := o.(*darwinOS)
+	if ok, err := d.setDNS("utun9", domains, nil, server); !ok || err != nil {
+		t.Fatalf("setDNS = %v, %v", ok, err)
+	}
+	b, err := os.ReadFile(resolvConfPath)
+	if err != nil || !strings.Contains(string(b), "\nnameserver 198.18.0.53\n") || !strings.Contains(string(b), "\nsearch lan\n") {
+		t.Fatalf("resolv.conf = %q, %v", b, err)
+	}
+	if _, err := os.Stat(filepath.Join(resolverDir, "home")); err != nil {
+		t.Fatalf("per-domain resolver missing: %v", err)
+	}
+	want := []netip.AddrPort{netip.MustParseAddrPort("192.168.1.1:53")}
+	if ups := d.dnsUpstreams(); !slices.Equal(ups, want) {
+		t.Fatalf("upstreams = %v, want %v", ups, want)
+	}
+	if !d.dnsIntact("utun9", domains, nil) {
+		t.Fatal("DNS configuration not intact")
+	}
+	// configd follows the network through the symlink, now the backup.
+	if err := os.WriteFile(target, []byte("nameserver 10.0.0.1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d.setDNS("utun9", domains, nil, server)
+	want = []netip.AddrPort{netip.MustParseAddrPort("10.0.0.1:53")}
+	if ups := d.dnsUpstreams(); !slices.Equal(ups, want) {
+		t.Fatalf("upstreams after a network change = %v, want %v", ups, want)
+	}
+
+	restored := func(when string) {
+		t.Helper()
+		if dst, err := os.Readlink(resolvConfPath); err != nil || dst != target {
+			t.Fatalf("%s: resolv.conf -> %q, %v; want the symlink back", when, dst, err)
+		}
+		if d.dnsUpstreams() != nil {
+			t.Fatalf("%s: still forwarding", when)
+		}
+	}
+	if _, err := d.setDNS("utun9", nil, nil, server); err != nil {
+		t.Fatal(err)
+	}
+	restored("no tailnet domains")
+	d.setDNS("utun9", domains, nil, server)
+	if err := d.close("utun9"); err != nil {
+		t.Fatal(err)
+	}
+	restored("close")
+	d.setDNS("utun9", domains, nil, server)
+	if _, err := newOSConfig(mux.TUNConfig{}); err != nil { // after a crash
+		t.Fatal(err)
+	}
+	if dst, err := os.Readlink(resolvConfPath); err != nil || dst != target {
+		t.Fatalf("after a crash: resolv.conf -> %q, %v", dst, err)
+	}
+
+	// Off by default.
+	o, _ = newOSConfig(mux.TUNConfig{})
+	o.setDNS("utun9", domains, nil, server)
+	if dst, err := os.Readlink(resolvConfPath); err != nil || dst != target {
+		t.Fatalf("taken over without resolv_conf: %q, %v", dst, err)
 	}
 }
 
