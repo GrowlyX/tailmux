@@ -25,6 +25,10 @@ var resolverDir = "/etc/resolver"
 
 const searchResolverFile = "search.tailmux"
 
+// resolvConfPath is a symlink to /var/run/resolv.conf, which configd
+// keeps listing the network's nameservers.
+var resolvConfPath = "/etc/resolv.conf"
+
 const resolverMarker = "# managed by tailmux; removed when it stops\n"
 
 const (
@@ -35,6 +39,10 @@ const (
 type darwinOS struct {
 	// pinned are the scoped default routes setExit added.
 	pinned []scopedDefault
+	// rc, if set, points /etc/resolv.conf at tailmux. mDNSResponder
+	// ignores that file, but dig, host, nslookup and programs with their
+	// own resolver read it.
+	rc *resolvConf
 }
 
 // scopedDefault is a default route that only sockets bound to ifname use.
@@ -42,9 +50,16 @@ type scopedDefault struct {
 	family, gateway, ifname string
 }
 
-func newOSConfig(mux.TUNConfig) (osConfig, error) {
+func newOSConfig(cfg mux.TUNConfig) (osConfig, error) {
 	d := &darwinOS{}
 	d.removeResolvers() // leftovers from a crash
+	rc := newResolvConf(resolvConfPath)
+	if err := rc.restore(); err != nil {
+		log.Printf("tun: restore /etc/resolv.conf: %v", err)
+	}
+	if cfg.ResolvConf {
+		d.rc = rc
+	}
 	return d, nil
 }
 
@@ -208,10 +223,21 @@ func (d darwinOS) setDNS(ifname string, domains, searchDomains []string, server 
 		}
 	}
 	d.removeResolvers(want)
+	if d.rc != nil {
+		if len(domains) == 0 {
+			return true, d.rc.restore()
+		}
+		if err := d.rc.set(server); err != nil {
+			return true, err
+		}
+	}
 	return true, nil
 }
 
-func (darwinOS) dnsIntact(_ string, domains, searchDomains []string) bool {
+func (d darwinOS) dnsIntact(_ string, domains, searchDomains []string) bool {
+	if d.rc != nil && len(domains) > 0 && !d.rc.intact() {
+		return false
+	}
 	for _, dom := range domains {
 		if dom == "." {
 			continue
@@ -244,6 +270,15 @@ func searchResolverBody(domains []string) ([]byte, error) {
 	return []byte(resolverMarker + "search " + strings.Join(domains, " ") + "\n"), nil
 }
 
+// dnsUpstreams are the nameservers to forward other names to while
+// /etc/resolv.conf sends every lookup to tailmux.
+func (d darwinOS) dnsUpstreams() []netip.AddrPort {
+	if d.rc == nil {
+		return nil
+	}
+	return d.rc.dnsUpstreams()
+}
+
 // flushDNS clears the system resolver cache, including failures cached
 // while tailnets were still reconnecting.
 func (darwinOS) flushDNS() {
@@ -270,5 +305,8 @@ func (darwinOS) removeResolvers(keep ...map[string]bool) {
 func (d *darwinOS) close(string) error {
 	err := d.pin(nil)
 	d.removeResolvers()
+	if d.rc != nil {
+		err = errors.Join(err, d.rc.restore())
+	}
 	return err
 }
