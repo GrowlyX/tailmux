@@ -406,6 +406,9 @@ jobs:
       HOMEBREW_NO_INSTALL_FROM_API: 1
     steps:
       - uses: actions/checkout@v7
+      # The runner image's Homebrew can lag a Go patch release behind
+      # go.mod, so build against the current formulae.
+      - run: brew update
       - name: formula for this commit
         run: |
           git archive --format=tar.gz --prefix=tailmux-0.0.0-ci/ -o "$RUNNER_TEMP/tailmux-0.0.0-ci.tar.gz" HEAD
