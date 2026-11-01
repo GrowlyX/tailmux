@@ -28,6 +28,10 @@ It needs `tailmux up` running.
 Commands that talk to the node, such as `status`, `ip`, `ping`, `whois`,
 `nc`, `dns status`, `cert`, `serve`, `lock sign` and `configure kubeconfig`.
 
+`serve` changes last until you undo them. To keep serves in the config
+instead, see [sharing services](setup.md#sharing-services-from-this-machine).
+tailmux replaces `serve` changes on ports the config lists when it starts.
+
 Not useful here:
 
 - `ssh`: plain `ssh host` already reaches every tailnet through tailmux.

@@ -38,6 +38,11 @@ func (m *Mux) AddTailnet(tc TailnetConfig) (*Tailnet, error) {
 	if tc.Hostname == "" {
 		tc.Hostname = m.cfg.Hostname
 	}
+	rawServe := tc.Serve
+	tc.Serve = slices.Clone(tc.Serve)
+	if err := normalizeServes(tc.Serve); err != nil {
+		return nil, err
+	}
 	m.tmu.Lock()
 	if m.byName[tc.Name] != nil {
 		m.tmu.Unlock()
@@ -72,6 +77,7 @@ func (m *Mux) AddTailnet(tc TailnetConfig) (*Tailnet, error) {
 	if err := m.editConfig(func(c *Config) {
 		raw := tc
 		raw.Hostname = "" // keep the config's own default
+		raw.Serve = rawServe
 		c.Tailnets = append(c.Tailnets, raw)
 	}); err != nil {
 		return t, fmt.Errorf("joined, but saving the config failed: %w", err)

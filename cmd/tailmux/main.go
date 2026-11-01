@@ -381,6 +381,9 @@ func status(cfg *mux.Config) error {
 		if l := t.Lock; l != nil && !l.Signed {
 			fmt.Printf("\n%s uses Tailnet Lock and this device isn't signed yet; on a signing device run:\n  %s\n", t.Name, l.SignCommand)
 		}
+		if t.ServeError != "" {
+			fmt.Printf("\n%s %s\n", t.Name, t.ServeError)
+		}
 		if len(t.Routes) > 0 || len(t.SplitDNS) > 0 {
 			fmt.Printf("\n%s:\n", t.Name)
 			for _, r := range t.Routes {

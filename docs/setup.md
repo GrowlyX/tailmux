@@ -85,6 +85,7 @@ signing device, and use what it prints as that tailnet's `auth_key`.
 | `tailnets[].hostname` | top-level `hostname` | Per-tailnet device name |
 | `tailnets[].ephemeral` | `false` | Device disappears when tailmux stops |
 | `tailnets[].state` | set when added | Folder in `state_dir` holding the login. Keeps the login through a rename; don't copy it between tailnets |
+| `tailnets[].serve` | none | Services on this machine to share with the tailnet ([below](#sharing-services-from-this-machine)) |
 | `hostname` | `tailmux-<host>` | Device name in every tailnet |
 | `pins` | none | CIDR or domain → tailnet, for contested routes |
 | `socks5` | `127.0.0.1:1055` | [Proxy mode](proxy.md) |
@@ -102,3 +103,34 @@ signing device, and use what it prints as that tailnet's `auth_key`.
 | `tun.resolv_conf` | `false` | macOS, and Linux without systemd-resolved: point `/etc/resolv.conf` at tailmux ([TUN mode](tun.md#etcresolvconf)) |
 | `updates.check` | `true` | Check GitHub for releases ([updates](updates.md)) |
 | `updates.auto` | `true` | Install them and restart; `false` only notifies |
+
+## Sharing services from this machine
+
+tailmux's nodes don't give this machine a `100.x` address that other
+devices can connect to. To let them reach a service running here, list it
+under the tailnet's `serve`. It works like `tailscale serve`:
+
+```json
+{ "name": "home", "serve": [
+  { "port": 3773, "tcp": "3773" },
+  { "port": 5432, "tls_tcp": "127.0.0.1:5432" },
+  { "port": 443,  "https": "3000" },
+  { "port": 443,  "https": "http://127.0.0.1:9000", "path": "/api" },
+  { "port": 80,   "http": "127.0.0.1:8080" }
+]}
+```
+
+- `port` is the port other devices connect to, at this device's MagicDNS name.
+- Set one of `tcp`, `tls_tcp` (tailmux handles TLS), `http` or `https`.
+- Targets: a port (`3000` means `127.0.0.1:3000`), `host:port`, or a URL.
+  A host other than localhost needs a scheme: `tcp://db:5432`,
+  `http://nas:8080`.
+- `path` mounts a web target under a path. Default `/`.
+
+tailmux applies the list when the tailnet comes up. To apply edits,
+restart tailmux.
+
+Ports in the list belong to tailmux: anything set on them with
+`tailmux cli serve` is replaced. Serves on other ports are left alone.
+Drop an entry and tailmux removes it at the next start.
+`tailmux cli -profile home serve status` shows what's being served.

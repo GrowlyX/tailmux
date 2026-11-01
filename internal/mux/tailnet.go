@@ -52,6 +52,10 @@ type Tailnet struct {
 	exitWant string               // exit node to use, as configured; "" for none
 	exitID   tailcfg.StableNodeID // exit node the node is set to use
 	exitErr  string               // why exitWant isn't in use
+
+	serveMu   sync.Mutex // serializes serve config writes
+	serveHost string     // MagicDNS name the configured serves were applied for
+	serveErr  string     // why the configured serves aren't applied
 }
 
 type tailnetOpts struct {
@@ -261,6 +265,9 @@ func (t *Tailnet) refresh(ctx context.Context) {
 	t.mu.Unlock()
 	if t.syncExitNode(ctx, snap) {
 		changed = true
+	}
+	if snap.Running && st.Self != nil {
+		t.syncServe(ctx, strings.TrimSuffix(st.Self.DNSName, "."))
 	}
 	if changed && t.onChange != nil {
 		t.onChange()
@@ -638,12 +645,14 @@ type TailnetStatus struct {
 	Error    string   `json:"error,omitempty"`
 	// Lock is set when the tailnet uses Tailnet Lock.
 	Lock *LockStatus `json:"lock,omitempty"`
+	// ServeError says why the config's serve entries aren't applied.
+	ServeError string `json:"serve_error,omitempty"`
 }
 
 func (t *Tailnet) Status() TailnetStatus {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	s := TailnetStatus{Name: t.cfg.Name, Enabled: t.Enabled(), State: t.state, AuthURL: t.authURL, Suffix: t.snap.Suffix, SplitDNS: t.snap.SplitDNS, Error: t.err, Lock: t.lock}
+	s := TailnetStatus{Name: t.cfg.Name, Enabled: t.Enabled(), State: t.state, AuthURL: t.authURL, Suffix: t.snap.Suffix, SplitDNS: t.snap.SplitDNS, Error: t.err, Lock: t.lock, ServeError: t.serveErr}
 	for _, ip := range t.selfIPs {
 		s.SelfIPs = append(s.SelfIPs, ip.String())
 	}

@@ -40,13 +40,30 @@ func TestEndToEnd(t *testing.T) {
 
 	alpha, bravo, charlie, webIPs := lab.Start(t, ctx)
 
+	// A local service for alpha's serve entry to forward to.
+	served, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { served.Close() })
+	go func() {
+		for {
+			c, err := served.Accept()
+			if err != nil {
+				return
+			}
+			fmt.Fprint(c, servedGreeting)
+			c.Close()
+		}
+	}()
+
 	cfg := &Config{
 		StateDir: t.TempDir(),
 		Hostname: "tailmux",
 		SOCKS5:   "127.0.0.1:0",
 		HTTP:     "127.0.0.1:0",
 		Tailnets: []TailnetConfig{
-			{Name: "alpha", ControlURL: alpha.URL, Ephemeral: true},
+			{Name: "alpha", ControlURL: alpha.URL, Ephemeral: true, Serve: []ServeEntry{{Port: e2eServePort, TCP: served.Addr().String()}}},
 			{Name: "bravo", ControlURL: bravo.URL, Ephemeral: true},
 			{Name: "charlie", ControlURL: charlie.URL, Ephemeral: true},
 		},
@@ -443,7 +460,35 @@ func TestEndToEnd(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("serve from the config", func(t *testing.T) {
+		tn := m.Tailnet("alpha")
+		peer, _ := alpha.Node(t, ctx, "client")
+		self := netip.MustParseAddr(tn.Status().SelfIPs[0])
+		addr := netip.AddrPortFrom(self, e2eServePort).String()
+		lab.Eventually(t, "a peer reaches the local service through serve", 30*time.Second, func() error {
+			c, err := peer.Dial(ctx, "tcp", addr)
+			if err != nil {
+				return fmt.Errorf("%w (serve error %q)", err, tn.Status().ServeError)
+			}
+			defer c.Close()
+			c.SetDeadline(time.Now().Add(5 * time.Second))
+			b, err := io.ReadAll(c)
+			if string(b) != servedGreeting {
+				return fmt.Errorf("got %q, %v", b, err)
+			}
+			return nil
+		})
+		if _, err := os.Stat(filepath.Join(tn.srv.Dir, serveRecordFile)); err != nil {
+			t.Errorf("serve record: %v", err)
+		}
+	})
 }
+
+const (
+	e2eServePort   = 3773
+	servedGreeting = "served from tailmux"
+)
 
 func toggle(t *testing.T, base, name, action string, header bool) int {
 	t.Helper()

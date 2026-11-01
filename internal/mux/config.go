@@ -98,6 +98,9 @@ type TailnetConfig struct {
 	// Configs from before it existed default to the name, which is where
 	// those logins live.
 	State string `json:"state,omitempty"`
+	// Serve shares services on this machine with the tailnet, like
+	// `tailscale serve`. Applied when the node comes up.
+	Serve []ServeEntry `json:"serve,omitempty"`
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -180,6 +183,9 @@ func (c *Config) Normalize() error {
 		}
 		if t.Hostname == "" {
 			t.Hostname = c.Hostname
+		}
+		if err := normalizeServes(t.Serve); err != nil {
+			return fmt.Errorf("config: tailnet %q: %w", t.Name, err)
 		}
 	}
 	for k, v := range c.Pins {
