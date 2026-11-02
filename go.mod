@@ -3,12 +3,12 @@ module github.com/GrowlyX/tailmux
 go 1.27.3
 
 require (
-	charm.land/bubbletea/v2 v2.1.0
+	charm.land/bubbletea/v2 v2.1.1
 	charm.land/huh/v2 v2.0.3
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/tailscale/wireguard-go v0.0.0-20260928213032-417aef361226
 	golang.org/x/mod v0.42.0
-	golang.org/x/net v0.61.0
+	golang.org/x/net v0.62.0
 	golang.org/x/sys v0.49.0
 	golang.zx2c4.com/wireguard/windows v1.1.1
 	gvisor.dev/gvisor v0.0.0-20260915211658-a6f909f08a72
