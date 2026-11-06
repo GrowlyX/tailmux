@@ -1,4 +1,3 @@
-import Charts
 import ServiceManagement
 import SwiftUI
 
@@ -87,75 +86,94 @@ struct FitWindow: NSViewRepresentable {
     }
 }
 
+/// Two minutes of per-tailnet throughput, drawn straight into a Canvas.
+/// Swift Charts used to draw this, but it leaked memory on every one-second
+/// refresh (its weak signal lists only ever grew), so the menu bar app
+/// crept up to hundreds of MB over a few days.
 struct ThroughputChart: View {
     @ObservedObject var store: Store
     var height: CGFloat = 96
 
-    struct Point: Identifiable {
-        var id: String { "\(name)-\(t)" }
-        var name: String
-        var t: Int
-        var v: Double
+    private struct Line {
+        var color: Color
+        var values: [Double]
     }
 
+    private static let historyLen = 120
+    private static let xTicks = [-120, -90, -60, -30, 0]
+    private static let yLabelWidth: CGFloat = 46
+    private static let xLabelHeight: CGFloat = 12
+    private static let topInset: CGFloat = 5 // room for the top y label
+    private static let minTop = 2048.0
+
     var body: some View {
-        let points = makePoints()
-        let peak = points.map(\.v).max() ?? 0
+        let lines = makeLines()
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text("Throughput").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
                 Spacer()
             }
-            Chart(points) { p in
-                LineMark(x: .value("t", p.t), y: .value("rate", p.v), series: .value("tailnet", p.name))
-                    .foregroundStyle(color(p.name))
-                    .lineStyle(StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
-                    .interpolationMethod(.monotone)
-                AreaMark(x: .value("t", p.t), y: .value("rate", p.v), series: .value("tailnet", p.name), stacking: .unstacked)
-                    .foregroundStyle(color(p.name).opacity(0.08))
-                    .interpolationMethod(.monotone)
-            }
-            .chartXScale(domain: -HistoryLen...0)
-            .chartYScale(domain: 0...max(peak * 1.15, 2048))
-            .chartPlotStyle { $0.clipped() }
-            .chartXAxis {
-                AxisMarks(values: [-120, -90, -60, -30, 0]) { v in
-                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [2, 3]))
-                    // Pull the end labels ("2m", "now") inside the plot.
-                    AxisValueLabel(anchor: v.index == 0 ? .topLeading : v.index == v.count - 1 ? .topTrailing : .top) {
-                        Text(timeLabel(v.as(Int.self) ?? 0)).font(.system(size: 9))
-                    }
-                }
-            }
-            .chartYAxis {
-                AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) { v in
-                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [2, 3]))
-                    AxisValueLabel {
-                        Text(formatRate(v.as(Double.self) ?? 0)).font(.system(size: 9))
-                    }
-                }
-            }
-            .frame(height: height)
+            Canvas { ctx, size in draw(lines, in: &ctx, size: size) }
+                .frame(height: height)
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.04)))
     }
 
-    private let HistoryLen = 120
-
-    private func makePoints() -> [Point] {
-        var out: [Point] = []
-        for t in store.tailnets where t.enabled {
-            let s = store.series(t.name)
-            for (i, v) in s.enumerated() {
-                out.append(Point(name: t.name, t: i - (s.count - 1), v: v))
-            }
+    private func makeLines() -> [Line] {
+        store.tailnets.enumerated().compactMap { i, t in
+            t.enabled ? Line(color: Palette.color(i), values: store.series(t.name)) : nil
         }
-        return out
     }
 
-    private func color(_ name: String) -> Color {
-        Palette.color(store.tailnets.firstIndex { $0.name == name } ?? 0)
+    private func draw(_ lines: [Line], in ctx: inout GraphicsContext, size: CGSize) {
+        let plot = CGRect(x: 0, y: Self.topInset, width: size.width - Self.yLabelWidth,
+                          height: size.height - Self.xLabelHeight - Self.topInset)
+        let peak = lines.lazy.flatMap(\.values).max() ?? 0
+        let top = max(peak * 1.15, Self.minTop)
+        let gridStyle = StrokeStyle(lineWidth: 0.5, dash: [2, 3])
+        let grid = GraphicsContext.Shading.color(.secondary.opacity(0.4))
+
+        for t in Self.xTicks {
+            let x = plot.width * CGFloat(t + Self.historyLen) / CGFloat(Self.historyLen)
+            ctx.stroke(Path { $0.move(to: CGPoint(x: x, y: plot.minY)); $0.addLine(to: CGPoint(x: x, y: plot.maxY)) }, with: grid, style: gridStyle)
+            let anchor: UnitPoint = t == Self.xTicks.first ? .topLeading : t == Self.xTicks.last ? .topTrailing : .top
+            ctx.draw(label(timeLabel(t)), at: CGPoint(x: x, y: plot.maxY + 1), anchor: anchor)
+        }
+        for v in yTicks(top: top) {
+            let y = plot.maxY - plot.height * CGFloat(v / top)
+            ctx.stroke(Path { $0.move(to: CGPoint(x: 0, y: y)); $0.addLine(to: CGPoint(x: plot.width, y: y)) }, with: grid, style: gridStyle)
+            ctx.draw(label(formatRate(v)), at: CGPoint(x: plot.width + 4, y: y), anchor: .leading)
+        }
+
+        ctx.clip(to: Path(plot))
+        for line in lines where !line.values.isEmpty {
+            let last = line.values.count - 1
+            let points = line.values.enumerated().map { i, v in
+                CGPoint(x: plot.width * CGFloat(Self.historyLen - (last - i)) / CGFloat(Self.historyLen),
+                        y: plot.maxY - plot.height * CGFloat(v / top))
+            }
+            var area = Path()
+            area.move(to: CGPoint(x: points[0].x, y: plot.maxY))
+            points.forEach { area.addLine(to: $0) }
+            area.addLine(to: CGPoint(x: points[last].x, y: plot.maxY))
+            ctx.fill(area, with: .color(line.color.opacity(0.08)))
+            ctx.stroke(Path { $0.addLines(points) }, with: .color(line.color),
+                       style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
+        }
+    }
+
+    private func label(_ text: String) -> Text {
+        Text(text).font(.system(size: 9)).foregroundColor(.secondary)
+    }
+
+    /// Gridlines at 0 and round numbers (1, 2 or 5 times a power of ten),
+    /// about three of them.
+    private func yTicks(top: Double) -> [Double] {
+        let raw = top / 3
+        let magnitude = pow(10, floor(log10(raw)))
+        let step = [1.0, 2, 5, 10].map { $0 * magnitude }.first { $0 >= raw } ?? 10 * magnitude
+        return Array(stride(from: 0, through: top, by: step))
     }
 }
 
