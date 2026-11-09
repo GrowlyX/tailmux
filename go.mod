@@ -12,7 +12,7 @@ require (
 	golang.org/x/sys v0.49.0
 	golang.zx2c4.com/wireguard/windows v1.1.1
 	gvisor.dev/gvisor v0.0.0-20260915211658-a6f909f08a72
-	tailscale.com v1.104.2
+	tailscale.com v1.104.5
 )
 
 require (
@@ -111,7 +111,7 @@ require (
 	github.com/safchain/ethtool v0.7.0 // indirect
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect
 	github.com/tailscale/certstore v0.1.1-0.20260409135935-3638fb84b77d // indirect
-	github.com/tailscale/gliderssh v0.3.4-0.20260716005906-1a0f895faf28 // indirect
+	github.com/tailscale/gliderssh v0.3.4-0.20261026144310-31f7cf365d3a // indirect
 	github.com/tailscale/go-winio v0.0.0-20231025203758-c4f33415bf55 // indirect
 	github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f // indirect
 	github.com/tailscale/netlink v1.1.1-0.20240822203006-4d49adab4de7 // indirect
