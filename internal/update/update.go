@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -157,9 +158,21 @@ func runBrew(ctx context.Context, brew string, args ...string) error {
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("brew %s: %v: %s", strings.Join(args, " "), err, lastLines(string(out), 6))
+		return fmt.Errorf("brew %s: %v: %s", strings.Join(args, " "), err, lastLines(withoutSupportTier(string(out)), 6))
 	}
 	return nil
+}
+
+// brewSupportTier matches the first line of the notice Homebrew prints on
+// exit for unsupported setups such as nix-homebrew. It comes after the
+// real error, so it would fill the error's last lines.
+var brewSupportTier = regexp.MustCompile(`(?m)^This is (a Tier \d+|an Unsupported) configuration:$`)
+
+func withoutSupportTier(out string) string {
+	if loc := brewSupportTier.FindStringIndex(out); loc != nil {
+		return out[:loc[0]]
+	}
+	return out
 }
 
 // brewUser picks the non-root user to run brew as: whoever owns brew,
