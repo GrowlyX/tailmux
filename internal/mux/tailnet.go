@@ -85,6 +85,7 @@ func newTailnet(cfg TailnetConfig, priority int, o tailnetOpts, onChange func())
 	if o.memStore {
 		t.srv.Store = new(mem.Store)
 	}
+	t.srv.RegisterFallbackTCPHandler(forwardInbound)
 	return t
 }
 
