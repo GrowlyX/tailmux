@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 // FakeIPs hands out a unique address per tailnet name. Every tailnet
@@ -22,13 +23,14 @@ type FakeIPs struct {
 	next   netip.Addr
 	byName map[string]netip.Addr
 	byIP   map[netip.Addr]string
+	given  map[string]time.Time // last handed out, so Prune spares names in use
 	path   string
 	dirty  bool
 }
 
 func NewFakeIPs(pfx netip.Prefix, path string) *FakeIPs {
 	pfx = pfx.Masked()
-	f := &FakeIPs{pfx: pfx, byName: map[string]netip.Addr{}, byIP: map[netip.Addr]string{}, path: path}
+	f := &FakeIPs{pfx: pfx, byName: map[string]netip.Addr{}, byIP: map[netip.Addr]string{}, given: map[string]time.Time{}, path: path}
 	f.next = f.first()
 	f.load()
 	return f
@@ -59,6 +61,7 @@ func (f *FakeIPs) For(name string) netip.Addr {
 	name = normName(name)
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.given[name] = time.Now()
 	if ip, ok := f.byName[name]; ok {
 		return ip
 	}
@@ -69,6 +72,7 @@ func (f *FakeIPs) For(name string) netip.Addr {
 	}
 	if old, ok := f.byIP[ip]; ok {
 		delete(f.byName, old)
+		delete(f.given, old)
 	}
 	f.byName[name] = ip
 	f.byIP[ip] = name
@@ -97,15 +101,18 @@ func (f *FakeIPs) Names() []string {
 
 // Prune drops the names gone reports true for, so a device removed from
 // its tailnet doesn't keep its address forever (and in fakeip.json across
-// restarts). It returns how many it dropped.
-func (f *FakeIPs) Prune(gone func(name string) bool) int {
+// restarts). Names handed out after since are kept: the check that found
+// them gone is older than the answer a client just got. It returns how
+// many it dropped.
+func (f *FakeIPs) Prune(since time.Time, gone func(name string) bool) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	n := 0
 	for name, ip := range f.byName {
-		if gone(name) {
+		if gone(name) && !f.given[name].After(since) {
 			delete(f.byName, name)
 			delete(f.byIP, ip)
+			delete(f.given, name)
 			n++
 		}
 	}

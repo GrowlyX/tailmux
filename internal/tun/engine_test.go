@@ -444,9 +444,16 @@ func TestFakeIPs(t *testing.T) {
 func TestFakeIPsPrune(t *testing.T) {
 	path := t.TempDir() + "/fake.json"
 	f := NewFakeIPs(netip.MustParsePrefix("198.18.0.0/15"), path)
+	checkStart := time.Now()
 	keep, gone := f.For("db.home"), f.For("old.home")
-	if n := f.Prune(func(name string) bool { return name == "old.home" }); n != 1 {
-		t.Fatalf("pruned %d, want 1", n)
+	f.For("back.home")
+	isGone := func(name string) bool { return name == "old.home" || name == "back.home" }
+	// Handed out after the check began: the check is stale, keep them.
+	if n := f.Prune(checkStart.Add(-time.Second), isGone); n != 0 {
+		t.Fatalf("pruned %d names handed out after the check began", n)
+	}
+	if n := f.Prune(time.Now(), isGone); n != 2 {
+		t.Fatalf("pruned %d, want 2", n)
 	}
 	if _, ok := f.Name(gone); ok {
 		t.Fatal("pruned address still maps to a name")

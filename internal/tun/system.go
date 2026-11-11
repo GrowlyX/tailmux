@@ -361,6 +361,7 @@ func (s *System) pruneLoop(ctx context.Context) {
 			return
 		case <-s.pruneReq:
 		}
+		start := time.Now()
 		r := s.m.Router()
 		lookup := func(ctx context.Context, name string) error {
 			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -369,7 +370,13 @@ func (s *System) pruneLoop(ctx context.Context) {
 			return err
 		}
 		gone := staleNames(ctx, s.fake.Names(), r.GonePeer, lookup)
-		if n := s.fake.Prune(func(name string) bool { return gone[name] }); n > 0 {
+		if s.m.Router() != r {
+			// The tailnets changed during the lookups (a device may be
+			// back), so these results are stale. That change queued a
+			// fresh pass.
+			continue
+		}
+		if n := s.fake.Prune(start, func(name string) bool { return gone[name] }); n > 0 {
 			log.Printf("tun: dropped %d fake IPs of removed devices", n)
 			if err := s.fake.Save(); err != nil {
 				log.Printf("tun: save fake IPs: %v", err)
