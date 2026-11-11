@@ -483,6 +483,57 @@ func TestEndToEnd(t *testing.T) {
 			t.Errorf("serve record: %v", err)
 		}
 	})
+
+	t.Run("inbound to local services", func(t *testing.T) {
+		if _, err := lanAddr(); err != nil {
+			t.Skip(err)
+		}
+		public := greeter(t, "0.0.0.0:0")
+		private := greeter(t, "127.0.0.1:0")
+		peer, _ := alpha.Node(t, ctx, "inbound-client")
+		self := netip.MustParseAddr(m.Tailnet("alpha").Status().SelfIPs[0])
+		read := func(ln net.Listener) (string, error) {
+			port := uint16(ln.Addr().(*net.TCPAddr).Port)
+			c, err := peer.Dial(ctx, "tcp", netip.AddrPortFrom(self, port).String())
+			if err != nil {
+				return "", err
+			}
+			defer c.Close()
+			c.SetDeadline(time.Now().Add(5 * time.Second))
+			b, _ := io.ReadAll(c)
+			return string(b), nil
+		}
+		lab.Eventually(t, "a peer reaches a service on 0.0.0.0", 30*time.Second, func() error {
+			if got, err := read(public); got != servedGreeting {
+				return fmt.Errorf("got %q, %v", got, err)
+			}
+			return nil
+		})
+		if got, _ := read(private); got != "" {
+			t.Errorf("127.0.0.1-only service reached from the tailnet: %q", got)
+		}
+	})
+}
+
+// greeter listens on addr and writes servedGreeting to each connection.
+func greeter(t *testing.T, addr string) net.Listener {
+	t.Helper()
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			fmt.Fprint(c, servedGreeting)
+			c.Close()
+		}
+	}()
+	return ln
 }
 
 const (
