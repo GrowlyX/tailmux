@@ -320,10 +320,12 @@ func (r *Router) nameIn(n *Snapshot, name string) Decision {
 }
 
 // GonePeer reports whether host names a device (db.home, or
-// db.<magicdns-suffix>) that its tailnet, connected now, doesn't have:
-// it was removed or renamed. Names that aren't a single device label, and
-// tailnets that are reconnecting or off, are never gone: there's nothing
-// current to check them against.
+// db.<magicdns-suffix>) that its tailnet, connected now, doesn't have.
+// That means it was removed or renamed, or the name is a DNS-only record
+// (MagicDNS extra records aren't devices), so callers confirm with a
+// lookup before acting on it. Names that aren't a single device label,
+// and tailnets that are reconnecting or off, are never gone: there's
+// nothing current to check them against.
 func (r *Router) GonePeer(host string) bool {
 	name := normName(host)
 	for i := range r.nets {

@@ -462,3 +462,24 @@ func TestFakeIPsPrune(t *testing.T) {
 		t.Fatalf("kept name: %q %v", n, ok)
 	}
 }
+
+// Only names that are neither devices nor DNS records are forgotten.
+func TestStaleNames(t *testing.T) {
+	notFound := &net.DNSError{Err: "no such host", IsNotFound: true}
+	dns := map[string]error{
+		"old.home": notFound,                  // removed device
+		"svc.home": nil,                       // MagicDNS extra record
+		"tmp.home": errors.New("i/o timeout"), // can't tell: keep
+	}
+	gonePeer := func(name string) bool { return name != "db.home" }
+	lookup := func(_ context.Context, name string) error {
+		if name == "db.home" {
+			t.Error("looked up a name that is still a device")
+		}
+		return dns[name]
+	}
+	got := staleNames(context.Background(), []string{"db.home", "old.home", "svc.home", "tmp.home"}, gonePeer, lookup)
+	if len(got) != 1 || !got["old.home"] {
+		t.Errorf("got %v, want only old.home", got)
+	}
+}

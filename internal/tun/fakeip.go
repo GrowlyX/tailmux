@@ -84,6 +84,17 @@ func (f *FakeIPs) Name(ip netip.Addr) (string, bool) {
 	return n, ok
 }
 
+// Names lists the names that have an address now.
+func (f *FakeIPs) Names() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	names := make([]string, 0, len(f.byName))
+	for n := range f.byName {
+		names = append(names, n)
+	}
+	return names
+}
+
 // Prune drops the names gone reports true for, so a device removed from
 // its tailnet doesn't keep its address forever (and in fakeip.json across
 // restarts). It returns how many it dropped.
