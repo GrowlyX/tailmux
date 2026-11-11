@@ -229,3 +229,22 @@ func TestExtractZip(t *testing.T) {
 		t.Fatalf("%q %v", got, err)
 	}
 }
+
+func TestBrewErrorSkipsSupportTierNotice(t *testing.T) {
+	out := `==> Upgrading growlyx/tap/tailmux
+Error: the real reason
+
+This is a Tier 3 configuration:
+  https://docs.brew.sh/Support-Tiers#tier-3
+Report issues to the upstream Nix project, not to Homebrew/* repositories!
+  https://github.com/zhaofengli/nix-homebrew/issues
+Read the above document before opening any issues or PRs.
+`
+	if got := lastLines(withoutSupportTier(out), 1); got != "Error: the real reason" {
+		t.Errorf("got %q", got)
+	}
+	plain := "Error: no notice\n"
+	if got := withoutSupportTier(plain); got != plain {
+		t.Errorf("got %q", got)
+	}
+}
