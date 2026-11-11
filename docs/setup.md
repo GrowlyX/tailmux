@@ -104,11 +104,25 @@ signing device, and use what it prints as that tailnet's `auth_key`.
 | `updates.check` | `true` | Check GitHub for releases ([updates](updates.md)) |
 | `updates.auto` | `true` | Install them and restart; `false` only notifies |
 
+## Incoming connections
+
+Other devices can reach this machine at its `100.x` address in each tailnet,
+like with Tailscale. Your tailnet's ACLs decide who's allowed. A connection
+to any port goes to the service listening on that port here, as long as the
+service listens on `0.0.0.0` or the LAN address. Services bound only to
+`127.0.0.1` stay private; use `serve` below to share them.
+
+- The service sees the connection coming from this machine's LAN address,
+  not from the device that opened it.
+- A port with no service on it accepts the connection and then closes it,
+  instead of refusing it.
+- With no LAN connection, incoming connections are closed.
+
 ## Sharing services from this machine
 
-tailmux's nodes don't give this machine a `100.x` address that other
-devices can connect to. To let them reach a service running here, list it
-under the tailnet's `serve`. It works like `tailscale serve`:
+To share a service that only listens on localhost, or to add TLS or a path,
+list it under the tailnet's `serve`. Ports listed there take precedence over
+incoming connections. It works like `tailscale serve`:
 
 ```json
 { "name": "home", "serve": [
