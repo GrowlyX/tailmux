@@ -319,6 +319,37 @@ func (r *Router) nameIn(n *Snapshot, name string) Decision {
 	return Decision{Tailnet: n.Name, Query: name}
 }
 
+// GonePeer reports whether host names a device (db.home, or
+// db.<magicdns-suffix>) that its tailnet, connected now, doesn't have.
+// That means it was removed or renamed, or the name is a DNS-only record
+// (MagicDNS extra records aren't devices), so callers confirm with a
+// lookup before acting on it. Names that aren't a single device label,
+// and tailnets that are reconnecting or off, are never gone: there's
+// nothing current to check them against.
+func (r *Router) GonePeer(host string) bool {
+	name := normName(host)
+	for i := range r.nets {
+		n := &r.nets[i]
+		var short string
+		switch {
+		case strings.HasSuffix(name, "."+n.Name):
+			short = strings.TrimSuffix(name, "."+n.Name)
+		case n.Suffix != "" && strings.HasSuffix(name, "."+n.Suffix):
+			short = strings.TrimSuffix(name, "."+n.Suffix)
+		default:
+			continue
+		}
+		if short == "" || strings.Contains(short, ".") {
+			return false
+		}
+		if d := r.RouteName(name); d.Tailnet != n.Name {
+			return false // a pin or another tailnet owns the name
+		}
+		return n.Running && n.peer(short) == nil
+	}
+	return false
+}
+
 // active: this tailnet's routes and names are claimed.
 func (n *Snapshot) active() bool { return n.Running || n.Reconnecting }
 

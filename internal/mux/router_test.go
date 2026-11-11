@@ -237,3 +237,26 @@ func TestPeerIsMullvad(t *testing.T) {
 		}
 	}
 }
+
+func TestGonePeer(t *testing.T) {
+	r := NewRouter([]Snapshot{
+		{Name: "home", Running: true, Suffix: "tailbbbb.ts.net", SplitDNS: []string{"corp.internal"},
+			Peers: []Peer{{Name: "db", FQDN: "db.tailbbbb.ts.net", IPs: ips("100.64.0.1")}}},
+		{Name: "away", Reconnecting: true, Suffix: "taildddd.ts.net"},
+	}, Pins{})
+	for name, want := range map[string]bool{
+		"db.home":             false, // still there
+		"DB.tailbbbb.ts.net.": false,
+		"old.home":            true, // removed
+		"old.tailbbbb.ts.net": true,
+		"a.b.home":            false, // not a device label
+		"web.corp.internal":   false, // split DNS, nothing to check
+		"old.away":            false, // reconnecting: peers aren't current
+		"old.taildddd.ts.net": false,
+		"example.com":         false,
+	} {
+		if got := r.GonePeer(name); got != want {
+			t.Errorf("GonePeer(%q) = %v, want %v", name, got, want)
+		}
+	}
+}

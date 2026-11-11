@@ -439,3 +439,54 @@ func TestFakeIPs(t *testing.T) {
 		t.Fatalf("got %q", n)
 	}
 }
+
+// A removed device's name is dropped, and stays dropped after a restart.
+func TestFakeIPsPrune(t *testing.T) {
+	path := t.TempDir() + "/fake.json"
+	f := NewFakeIPs(netip.MustParsePrefix("198.18.0.0/15"), path)
+	checkStart := time.Now()
+	keep, gone := f.For("db.home"), f.For("old.home")
+	f.For("back.home")
+	isGone := func(name string) bool { return name == "old.home" || name == "back.home" }
+	// Handed out after the check began: the check is stale, keep them.
+	if n := f.Prune(checkStart.Add(-time.Second), isGone); n != 0 {
+		t.Fatalf("pruned %d names handed out after the check began", n)
+	}
+	if n := f.Prune(time.Now(), isGone); n != 2 {
+		t.Fatalf("pruned %d, want 2", n)
+	}
+	if _, ok := f.Name(gone); ok {
+		t.Fatal("pruned address still maps to a name")
+	}
+	if err := f.Save(); err != nil {
+		t.Fatal(err)
+	}
+	g := NewFakeIPs(netip.MustParsePrefix("198.18.0.0/15"), path)
+	if _, ok := g.Name(gone); ok {
+		t.Fatal("pruned name came back after a restart")
+	}
+	if n, ok := g.Name(keep); !ok || n != "db.home" {
+		t.Fatalf("kept name: %q %v", n, ok)
+	}
+}
+
+// Only names that are neither devices nor DNS records are forgotten.
+func TestStaleNames(t *testing.T) {
+	notFound := &net.DNSError{Err: "no such host", IsNotFound: true}
+	dns := map[string]error{
+		"old.home": notFound,                  // removed device
+		"svc.home": nil,                       // MagicDNS extra record
+		"tmp.home": errors.New("i/o timeout"), // can't tell: keep
+	}
+	gonePeer := func(name string) bool { return name != "db.home" }
+	lookup := func(_ context.Context, name string) error {
+		if name == "db.home" {
+			t.Error("looked up a name that is still a device")
+		}
+		return dns[name]
+	}
+	got := staleNames(context.Background(), []string{"db.home", "old.home", "svc.home", "tmp.home"}, gonePeer, lookup)
+	if len(got) != 1 || !got["old.home"] {
+		t.Errorf("got %v, want only old.home", got)
+	}
+}

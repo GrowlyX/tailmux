@@ -64,6 +64,7 @@ type System struct {
 	skipped       map[netip.Prefix]bool
 	cancel        context.CancelFunc
 	done          chan struct{}
+	pruneReq      chan struct{} // asks pruneLoop for a pass; holds at most one
 }
 
 type systemState struct {
@@ -81,7 +82,8 @@ func Start(ctx context.Context, m *mux.Mux, cfg *mux.Config) (*System, error) {
 	}
 	fake := NewFakeIPs(netip.MustParsePrefix(cfg.TUN.Range), filepath.Join(cfg.StateDir, "fakeip.json"))
 	s := &System{m: m, cfg: cfg, os: osc, fake: fake,
-		routes: map[netip.Prefix]bool{}, skipped: map[netip.Prefix]bool{}, done: make(chan struct{})}
+		routes: map[netip.Prefix]bool{}, skipped: map[netip.Prefix]bool{}, done: make(chan struct{}),
+		pruneReq: make(chan struct{}, 1)}
 	eng, err := s.newDevice()
 	if err != nil {
 		return nil, err
@@ -89,8 +91,15 @@ func Start(ctx context.Context, m *mux.Mux, cfg *mux.Config) (*System, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	s.cancel = cancel
 	go s.run(ctx, eng)
-	m.OnChange(func() { s.reconcile(false) })
+	m.OnChange(func() {
+		s.requestPrune()
+		s.reconcile(false)
+	})
 	s.reconcile(false)
+	// The tailnets may have connected before the listener above was
+	// registered: check what fakeip.json brought back now, too.
+	s.requestPrune()
+	go s.pruneLoop(ctx)
 	go s.watchNetwork(ctx)
 	log.Printf("tun      %s  (fake IPs %s, DNS %s)", s.Interface(), fake.Prefix(), fake.DNS())
 	return s, nil
@@ -333,6 +342,65 @@ func (s *System) Interface() string {
 }
 
 func (s *System) FakeIPs() *FakeIPs { return s.fake }
+
+func (s *System) requestPrune() {
+	select {
+	case s.pruneReq <- struct{}{}:
+	default: // a pass is already queued
+	}
+}
+
+// pruneLoop forgets fake addresses of devices their tailnet no longer
+// has, after each tailnet change (peers coming and going are changes).
+// Checking a name can take a DNS query, so it runs here rather than in
+// the change callback.
+func (s *System) pruneLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.pruneReq:
+		}
+		start := time.Now()
+		r := s.m.Router()
+		lookup := func(ctx context.Context, name string) error {
+			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			_, err := s.m.Resolve(ctx, name)
+			return err
+		}
+		gone := staleNames(ctx, s.fake.Names(), r.GonePeer, lookup)
+		if s.m.Router() != r {
+			// The tailnets changed during the lookups (a device may be
+			// back), so these results are stale. That change queued a
+			// fresh pass.
+			continue
+		}
+		if n := s.fake.Prune(start, func(name string) bool { return gone[name] }); n > 0 {
+			log.Printf("tun: dropped %d fake IPs of removed devices", n)
+			if err := s.fake.Save(); err != nil {
+				log.Printf("tun: save fake IPs: %v", err)
+			}
+		}
+	}
+}
+
+// staleNames picks the names to forget: no longer a device of their
+// connected tailnet, and the tailnet's DNS has no such name either. The
+// DNS check keeps MagicDNS extra records (svc.<suffix>), which were never
+// devices but still resolve and may need their fake address.
+func staleNames(ctx context.Context, names []string, gonePeer func(string) bool, lookup func(context.Context, string) error) map[string]bool {
+	gone := map[string]bool{}
+	for _, name := range names {
+		if ctx.Err() != nil {
+			break
+		}
+		if gonePeer(name) && mux.IsNotFound(lookup(ctx, name)) {
+			gone[name] = true
+		}
+	}
+	return gone
+}
 
 // DNSActive reports whether the OS resolver sends tailnet domains here.
 func (s *System) DNSActive() bool {
