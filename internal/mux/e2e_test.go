@@ -485,7 +485,7 @@ func TestEndToEnd(t *testing.T) {
 	})
 
 	t.Run("inbound to local services", func(t *testing.T) {
-		if _, err := lanAddr(); err != nil {
+		if _, err := lanAddrs(); err != nil {
 			t.Skip(err)
 		}
 		public := greeter(t, "0.0.0.0:0")

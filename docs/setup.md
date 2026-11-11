@@ -109,7 +109,7 @@ signing device, and use what it prints as that tailnet's `auth_key`.
 Other devices can reach this machine at its `100.x` address in each tailnet,
 like with Tailscale. Your tailnet's ACLs decide who's allowed. A connection
 to any port goes to the service listening on that port here, as long as the
-service listens on `0.0.0.0` or the LAN address. Services bound only to
+service listens on `0.0.0.0` or one of its LAN addresses. Services bound only to
 `127.0.0.1` stay private; use `serve` below to share them.
 
 - The service sees the connection coming from this machine's LAN address,

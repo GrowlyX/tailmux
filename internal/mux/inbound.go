@@ -22,11 +22,7 @@ import (
 func forwardInbound(_, dst netip.AddrPort) (func(net.Conn), bool) {
 	return func(c net.Conn) {
 		defer c.Close()
-		ip, err := lanAddr()
-		if err != nil {
-			return
-		}
-		up, err := net.DialTimeout("tcp", net.JoinHostPort(ip.String(), strconv.Itoa(int(dst.Port()))), 5*time.Second)
+		up, err := dialLAN(dst.Port())
 		if err != nil {
 			return
 		}
@@ -35,13 +31,35 @@ func forwardInbound(_, dst netip.AddrPort) (func(net.Conn), bool) {
 	}, true
 }
 
-// lanAddr is this machine's first LAN IPv4 address. Looked up per
-// connection so a new DHCP lease or network doesn't need a restart.
-func lanAddr() (netip.Addr, error) {
+// dialLAN connects to port on this machine's LAN addresses, trying each
+// in turn, so a service bound to only one interface (Wi-Fi but not
+// Ethernet, say) is still found. A local dial to a closed port is
+// refused at once, so walking the list is cheap.
+func dialLAN(port uint16) (net.Conn, error) {
+	ips, err := lanAddrs()
+	if err != nil {
+		return nil, err
+	}
+	p := strconv.Itoa(int(port))
+	for _, ip := range ips {
+		up, derr := net.DialTimeout("tcp", net.JoinHostPort(ip.String(), p), 5*time.Second)
+		if derr == nil {
+			return up, nil
+		}
+		err = derr
+	}
+	return nil, err
+}
+
+// lanAddrs is this machine's LAN IPv4 addresses, in interface order.
+// Looked up per connection so a new DHCP lease or network doesn't need
+// a restart.
+func lanAddrs() ([]netip.Addr, error) {
 	ifs, err := net.Interfaces()
 	if err != nil {
-		return netip.Addr{}, err
+		return nil, err
 	}
+	var ips []netip.Addr
 	for _, ifc := range ifs {
 		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&(net.FlagLoopback|net.FlagPointToPoint) != 0 {
 			continue
@@ -56,10 +74,16 @@ func lanAddr() (netip.Addr, error) {
 				continue
 			}
 			ip := pfx.Addr()
-			if ip.Is4() && !ip.IsLinkLocalUnicast() && !tsaddr.IsTailscaleIP(ip) {
-				return ip, nil
+			// Some VM bridges hold their subnet's network address
+			// (192.168.x.0/24), which binds but can't be dialed.
+			netAddr := pfx.Bits() < 31 && ip == pfx.Masked().Addr()
+			if ip.Is4() && !netAddr && !ip.IsLinkLocalUnicast() && !tsaddr.IsTailscaleIP(ip) {
+				ips = append(ips, ip)
 			}
 		}
 	}
-	return netip.Addr{}, errors.New("no LAN address")
+	if len(ips) == 0 {
+		return nil, errors.New("no LAN address")
+	}
+	return ips, nil
 }
