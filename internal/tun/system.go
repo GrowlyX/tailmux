@@ -89,7 +89,10 @@ func Start(ctx context.Context, m *mux.Mux, cfg *mux.Config) (*System, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	s.cancel = cancel
 	go s.run(ctx, eng)
-	m.OnChange(func() { s.reconcile(false) })
+	m.OnChange(func() {
+		s.pruneFakeIPs()
+		s.reconcile(false)
+	})
 	s.reconcile(false)
 	go s.watchNetwork(ctx)
 	log.Printf("tun      %s  (fake IPs %s, DNS %s)", s.Interface(), fake.Prefix(), fake.DNS())
@@ -333,6 +336,18 @@ func (s *System) Interface() string {
 }
 
 func (s *System) FakeIPs() *FakeIPs { return s.fake }
+
+// pruneFakeIPs forgets fake addresses of devices their tailnet no longer
+// has. Runs on every tailnet change, which includes peers coming and going.
+func (s *System) pruneFakeIPs() {
+	r := s.m.Router()
+	if n := s.fake.Prune(r.GonePeer); n > 0 {
+		log.Printf("tun: dropped %d fake IPs of removed devices", n)
+		if err := s.fake.Save(); err != nil {
+			log.Printf("tun: save fake IPs: %v", err)
+		}
+	}
+}
 
 // DNSActive reports whether the OS resolver sends tailnet domains here.
 func (s *System) DNSActive() bool {

@@ -84,6 +84,26 @@ func (f *FakeIPs) Name(ip netip.Addr) (string, bool) {
 	return n, ok
 }
 
+// Prune drops the names gone reports true for, so a device removed from
+// its tailnet doesn't keep its address forever (and in fakeip.json across
+// restarts). It returns how many it dropped.
+func (f *FakeIPs) Prune(gone func(name string) bool) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for name, ip := range f.byName {
+		if gone(name) {
+			delete(f.byName, name)
+			delete(f.byIP, ip)
+			n++
+		}
+	}
+	if n > 0 {
+		f.dirty = true
+	}
+	return n
+}
+
 // The mapping is saved so that addresses the OS already cached keep
 // working across restarts.
 type fakeState struct {

@@ -439,3 +439,26 @@ func TestFakeIPs(t *testing.T) {
 		t.Fatalf("got %q", n)
 	}
 }
+
+// A removed device's name is dropped, and stays dropped after a restart.
+func TestFakeIPsPrune(t *testing.T) {
+	path := t.TempDir() + "/fake.json"
+	f := NewFakeIPs(netip.MustParsePrefix("198.18.0.0/15"), path)
+	keep, gone := f.For("db.home"), f.For("old.home")
+	if n := f.Prune(func(name string) bool { return name == "old.home" }); n != 1 {
+		t.Fatalf("pruned %d, want 1", n)
+	}
+	if _, ok := f.Name(gone); ok {
+		t.Fatal("pruned address still maps to a name")
+	}
+	if err := f.Save(); err != nil {
+		t.Fatal(err)
+	}
+	g := NewFakeIPs(netip.MustParsePrefix("198.18.0.0/15"), path)
+	if _, ok := g.Name(gone); ok {
+		t.Fatal("pruned name came back after a restart")
+	}
+	if n, ok := g.Name(keep); !ok || n != "db.home" {
+		t.Fatalf("kept name: %q %v", n, ok)
+	}
+}
