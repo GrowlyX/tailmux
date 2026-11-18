@@ -241,6 +241,13 @@ func (f *Tailnet) SplitDNS(t *testing.T, ctx context.Context, zone string, answe
 	}()
 }
 
+// GlobalDNS is SplitDNS with the resolver as the tailnet's global
+// nameserver (local DNS overridden) instead of zone's.
+func (f *Tailnet) GlobalDNS(t *testing.T, ctx context.Context, zone string, answer netip.Addr) {
+	f.SplitDNS(t, ctx, zone, answer)
+	f.Control.DNSConfig = &tailcfg.DNSConfig{Proxied: true, Resolvers: f.Control.DNSConfig.Routes[zone]}
+}
+
 // Start brings up three tailnets that deliberately collide: every
 // "web" node gets 100.64.0.1, alpha and bravo both route 192.0.2.0/24,
 // and charlie serves corp.internal over split DNS.

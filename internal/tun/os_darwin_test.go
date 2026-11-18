@@ -45,6 +45,7 @@ func TestDarwinPin(t *testing.T) {
 	oldDir := resolverDir
 	resolverDir = t.TempDir()
 	t.Cleanup(func() { runRoute, resolverDir = old, oldDir })
+	useFakeDynamicStore(t)
 
 	wired := scopedDefault{family: "-inet", gateway: "192.168.50.1", ifname: "en15"}
 	wifi := scopedDefault{family: "-inet", gateway: "10.244.0.1", ifname: "en0"}
@@ -102,6 +103,7 @@ func TestDarwinSearchDomains(t *testing.T) {
 	resolverDir = t.TempDir()
 	resolvConfPath = filepath.Join(t.TempDir(), "resolv.conf")
 	t.Cleanup(func() { resolverDir, resolvConfPath = old, oldRC })
+	useFakeDynamicStore(t)
 	d := darwinOS{}
 	server := netip.MustParseAddr("198.18.0.53")
 	path := filepath.Join(resolverDir, searchResolverFile)
@@ -195,6 +197,7 @@ func TestDarwinResolvConf(t *testing.T) {
 	etc, run := t.TempDir(), t.TempDir()
 	resolvConfPath = filepath.Join(etc, "resolv.conf")
 	t.Cleanup(func() { resolverDir, resolvConfPath = old, oldRC })
+	useFakeDynamicStore(t)
 	target := filepath.Join(run, "resolv.conf")
 	if err := os.WriteFile(target, []byte("search lan\nnameserver 192.168.1.1\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -236,6 +239,16 @@ func TestDarwinResolvConf(t *testing.T) {
 	if ups := d.dnsUpstreams(); !slices.Equal(ups, want) {
 		t.Fatalf("upstreams after a network change = %v, want %v", ups, want)
 	}
+	// configd lists only tailmux while it is the default resolver, and
+	// may not have caught up when that ends.
+	d.setDNS("utun9", append(domains, rootDomain), nil, server)
+	if err := os.WriteFile(target, []byte("nameserver 198.18.0.53\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d.setDNS("utun9", domains, nil, server)
+	if ups := d.dnsUpstreams(); !slices.Equal(ups, want) {
+		t.Fatalf("upstreams while configd lists only tailmux = %v, want %v", ups, want)
+	}
 
 	restored := func(when string) {
 		t.Helper()
@@ -268,6 +281,82 @@ func TestDarwinResolvConf(t *testing.T) {
 	o.setDNS("utun9", domains, nil, server)
 	if dst, err := os.Readlink(resolvConfPath); err != nil || dst != target {
 		t.Fatalf("taken over without resolv_conf: %q, %v", dst, err)
+	}
+}
+
+// fakeDynamicStore stands in for scutil, keeping what is set as scutil
+// prints it.
+type fakeDynamicStore map[string]string
+
+func (s fakeDynamicStore) run(cmds ...string) string {
+	var dict string
+	for _, c := range cmds {
+		cmd, arg, _ := strings.Cut(c, " ")
+		key, val, _ := strings.Cut(arg, " * ")
+		switch cmd {
+		case "d.add":
+			dict += key + " : <array> {\n  0 : " + val + "\n}\n"
+		case "set":
+			s[arg] = dict
+		case "remove":
+			delete(s, arg)
+		case "show":
+			return s[arg]
+		}
+	}
+	return ""
+}
+
+func useFakeDynamicStore(t *testing.T) fakeDynamicStore {
+	store := fakeDynamicStore{}
+	old := runScutil
+	runScutil = store.run
+	t.Cleanup(func() { runScutil = old })
+	return store
+}
+
+func TestDarwinDefaultResolver(t *testing.T) {
+	old := resolverDir
+	resolverDir = t.TempDir()
+	t.Cleanup(func() { resolverDir = old })
+	store := useFakeDynamicStore(t)
+	d := darwinOS{}
+	server := netip.MustParseAddr("198.18.0.53")
+	all := []string{"work", rootDomain}
+
+	if ok, err := d.setDNS("utun9", all, nil, server); !ok || err != nil || scutilAddr(store[defaultResolverKey]) != server {
+		t.Fatalf("setDNS = %v, %v; default resolver %q", ok, err, store[defaultResolverKey])
+	}
+	if !strings.Contains(store[defaultResolverKey], `SupplementalMatchDomains : <array> {
+  0 : ""`) || !d.dnsIntact("utun9", all, nil) {
+		t.Fatalf("default resolver doesn't match every name: %q", store[defaultResolverKey])
+	}
+	delete(store, defaultResolverKey)
+	if d.dnsIntact("utun9", all, nil) {
+		t.Fatal("lost default resolver accepted")
+	}
+	d.setDNS("utun9", all, nil, server)
+	if d.setDNS("utun9", []string{"work"}, nil, server); store[defaultResolverKey] != "" {
+		t.Fatal("default resolver left behind without an exit node")
+	}
+	d.setDNS("utun9", all, nil, server)
+	if d.close("utun9"); store[defaultResolverKey] != "" {
+		t.Fatal("default resolver left behind on close")
+	}
+}
+
+func TestDarwinLocalDNS(t *testing.T) {
+	store := useFakeDynamicStore(t)
+	store[primaryIPv4Key] = "<dictionary> {\n  PrimaryInterface : en0\n  PrimaryService : B6F2\n}"
+	store["State:/Network/Service/B6F2/DNS"] = "SearchDomains : <array> {\n  0 : localdomain\n}\nServerAddresses : <array> {\n  0 : 192.168.10.1\n}"
+	// With tailmux as the default resolver, the global entry is tailmux.
+	store["State:/Network/Global/DNS"] = "ServerAddresses : <array> {\n  0 : 198.18.0.53\n}"
+	if got := localDNS(); got != netip.MustParseAddr("192.168.10.1") {
+		t.Fatalf("localDNS = %v; want the primary service's", got)
+	}
+	store["Setup:/Network/Service/B6F2/DNS"] = "ServerAddresses : <array> {\n  0 : 9.9.9.9\n}"
+	if got := localDNS(); got != netip.MustParseAddr("9.9.9.9") {
+		t.Fatalf("localDNS = %v; want the one set by hand", got)
 	}
 }
 

@@ -163,6 +163,7 @@ func (d *systemDevice) Close() error {
 	s.dev = nil
 	s.dnsActive = false
 	s.exit = false
+	s.useLocalResolver(false)
 	s.publishState()
 	s.domains = nil
 	s.routedNow.Store(nil)
@@ -500,8 +501,9 @@ func (s *System) reconcileLocked(force bool) {
 	}
 	s.publishRoutes()
 	// With an exit node everything goes into the TUN (routes no tailnet
-	// claims leave through the exit node), and so do all DNS lookups: "."
-	// asks the OS to send every name here, where supported.
+	// claims leave through the exit node), and so do all DNS lookups, as
+	// when a tailnet overrides local DNS: rootDomain asks the OS to send
+	// every name here, where supported.
 	exit := s.m.ExitNode() != nil
 	if force || exit != s.exit {
 		if err := s.os.setExit(ifname, exit); err != nil {
@@ -512,16 +514,24 @@ func (s *System) reconcileLocked(force bool) {
 		s.exit = exit
 		s.publishState()
 	}
-	if exit {
-		domains = append(slices.Clone(domains), ".")
+	if s.m.TakesAllDNS() {
+		domains = append(slices.Clone(domains), rootDomain)
 	}
 	if s.cfg.TUN.NoDNS || (!force && slices.Equal(domains, s.domains) && slices.Equal(searchDomains, s.searchDomains)) {
 		return
+	}
+	// On before the OS sends every name here; off only once it stops.
+	allDNS := slices.Contains(domains, rootDomain)
+	if allDNS {
+		s.useLocalResolver(true)
 	}
 	ok, err := s.os.setDNS(ifname, domains, searchDomains, s.fake.DNS())
 	if err != nil {
 		log.Printf("tun: dns: %v", err)
 		return
+	}
+	if !allDNS {
+		s.useLocalResolver(false)
 	}
 	searchChanged := !slices.Equal(searchDomains, s.searchDomains)
 	s.domains, s.searchDomains, s.dnsActive = domains, searchDomains, ok
@@ -532,6 +542,20 @@ func (s *System) reconcileLocked(force bool) {
 	if ok && len(domains) > 0 {
 		log.Printf("tun: resolving %s via %s", strings.Join(domains, ", "), s.fake.DNS())
 	}
+}
+
+const rootDomain = "."
+
+// localResolverOS can reach the local network's resolver while the OS
+// sends every name here.
+type localResolverOS interface{ localResolver() *net.Resolver }
+
+func (s *System) useLocalResolver(on bool) {
+	var r *net.Resolver
+	if lr, ok := s.os.(localResolverOS); ok && on {
+		r = lr.localResolver()
+	}
+	s.m.SetSystemResolver(r)
 }
 
 func (s *System) Close() error {

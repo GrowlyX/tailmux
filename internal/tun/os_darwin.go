@@ -2,9 +2,11 @@ package tun
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/netip"
 	"os"
 	"os/exec"
@@ -31,6 +33,14 @@ var resolvConfPath = "/etc/resolv.conf"
 
 const resolverMarker = "# managed by tailmux; removed when it stops\n"
 
+// defaultResolverKey sends every name to tailmux: an empty supplemental
+// match domain ranks it ahead of the network's own resolver.
+const defaultResolverKey = "State:/Network/Service/tailmux/DNS"
+
+const primaryIPv4Key = "State:/Network/Global/IPv4"
+
+const dnsPort = 53
+
 const (
 	routeExists  = "File exists"
 	routeMissing = "not in table"
@@ -53,6 +63,7 @@ type scopedDefault struct {
 func newOSConfig(cfg mux.TUNConfig) (osConfig, error) {
 	d := &darwinOS{}
 	d.removeResolvers() // leftovers from a crash
+	runScutil("remove " + defaultResolverKey)
 	rc := newResolvConf(resolvConfPath)
 	if err := rc.restore(); err != nil {
 		log.Printf("tun: restore /etc/resolv.conf: %v", err)
@@ -208,9 +219,8 @@ func (d darwinOS) setDNS(ifname string, domains, searchDomains []string, server 
 	}
 	body := []byte(resolverMarker + "nameserver " + server.String() + "\n")
 	for _, dom := range domains {
-		// "." (every name, for an exit node) has no /etc/resolver form;
-		// macOS keeps using the network's resolver for other names.
-		if dom == "" || dom == "." || strings.ContainsAny(dom, "/\\") {
+		// /etc/resolver has no form for the root domain.
+		if dom == "" || dom == rootDomain || strings.ContainsAny(dom, "/\\") {
 			continue
 		}
 		want[dom] = true
@@ -223,12 +233,22 @@ func (d darwinOS) setDNS(ifname string, domains, searchDomains []string, server 
 		}
 	}
 	d.removeResolvers(want)
+	allDNS := slices.Contains(domains, rootDomain)
+	if !allDNS {
+		runScutil("remove " + defaultResolverKey)
+	}
 	if d.rc != nil {
 		if len(domains) == 0 {
 			return true, d.rc.restore()
 		}
 		if err := d.rc.set(server); err != nil {
 			return true, err
+		}
+	}
+	if allDNS {
+		out := runScutil("d.init", "d.add ServerAddresses * "+server.String(), `d.add SupplementalMatchDomains * ""`, "set "+defaultResolverKey)
+		if out != "" {
+			return false, fmt.Errorf("scutil set %s: %s", defaultResolverKey, out)
 		}
 	}
 	return true, nil
@@ -239,7 +259,10 @@ func (d darwinOS) dnsIntact(_ string, domains, searchDomains []string) bool {
 		return false
 	}
 	for _, dom := range domains {
-		if dom == "." {
+		if dom == rootDomain {
+			if !scutilAddr(runScutil("show " + defaultResolverKey)).IsValid() {
+				return false
+			}
 			continue
 		}
 		b, err := os.ReadFile(filepath.Join(resolverDir, dom))
@@ -300,11 +323,55 @@ func (darwinOS) removeResolvers(keep ...map[string]bool) {
 	}
 }
 
-// Routes on a utun disappear with it; the scoped default routes and
-// resolver files don't.
+// runScutil runs commands through scutil and returns what it prints,
+// which is how it reports errors; tests replace it.
+var runScutil = func(cmds ...string) string {
+	cmd := exec.Command("/usr/sbin/scutil")
+	cmd.Stdin = strings.NewReader(strings.Join(cmds, "\n") + "\n")
+	out, _ := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out))
+}
+
+// scutilField is the value of the first "key : value" line in out.
+func scutilField(out, key string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if k, v, ok := strings.Cut(strings.TrimSpace(line), " : "); ok && k == key {
+			return v
+		}
+	}
+	return ""
+}
+
+// scutilAddr is the first server in a DNS dictionary scutil printed.
+func scutilAddr(out string) netip.Addr {
+	_, servers, _ := strings.Cut(out, "ServerAddresses")
+	ip, _ := netip.ParseAddr(scutilField(servers, "0"))
+	return ip
+}
+
+// localDNS is the primary network service's own DNS server: set by hand
+// (Setup) or else by DHCP (State).
+func localDNS() netip.Addr {
+	service := scutilField(runScutil("show "+primaryIPv4Key), "PrimaryService")
+	if ip := scutilAddr(runScutil("show Setup:/Network/Service/" + service + "/DNS")); ip.IsValid() {
+		return ip
+	}
+	return scutilAddr(runScutil("show State:/Network/Service/" + service + "/DNS"))
+}
+
+func (darwinOS) localResolver() *net.Resolver {
+	return &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, netip.AddrPortFrom(localDNS(), dnsPort).String())
+	}}
+}
+
+// Routes on a utun disappear with it; the scoped default routes,
+// resolver files and default resolver don't.
 func (d *darwinOS) close(string) error {
 	err := d.pin(nil)
 	d.removeResolvers()
+	runScutil("remove " + defaultResolverKey)
 	if d.rc != nil {
 		err = errors.Join(err, d.rc.restore())
 	}

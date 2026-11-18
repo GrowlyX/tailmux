@@ -44,7 +44,8 @@ type Tailnet struct {
 	authURL string
 	selfIPs []netip.Addr
 	err     string
-	// split-DNS domain -> resolver addresses, for names we resolve ourselves
+	// split-DNS domain -> resolver addresses, for names we resolve
+	// ourselves; globalResolvers holds the OverrideDNS nameservers
 	splitRes map[string][]netip.AddrPort
 
 	lock *LockStatus // nil until known, or when Tailnet Lock is off
@@ -223,6 +224,12 @@ func (t *Tailnet) refresh(ctx context.Context) {
 	if snap.Running {
 		if dc, err := t.lc.DNSConfig(ctx); err == nil && dc != nil {
 			dnsOK = true
+			snap.OverrideDNS = len(dc.Resolvers) > 0
+			for _, r := range dc.Resolvers {
+				if ap, ok := r.IPPort(); ok {
+					splitRes[globalResolvers] = append(splitRes[globalResolvers], ap)
+				}
+			}
 			for dom, res := range dc.Routes {
 				dom = normName(dom)
 				if len(res) == 0 || !usefulSplitDomain(dom, snap.Suffix) {
@@ -246,6 +253,9 @@ func (t *Tailnet) refresh(ctx context.Context) {
 		// A slow DNS-config fetch shouldn't drop split-DNS routing;
 		// keep the last known config until the next refresh.
 		snap.SplitDNS, splitRes = t.snap.SplitDNS, t.splitRes
+	}
+	if snap.Running && !dnsOK || snap.Reconnecting {
+		snap.OverrideDNS = t.snap.OverrideDNS
 	}
 	changed := !snapEqual(t.snap, snap)
 	t.snap = snap
@@ -465,9 +475,10 @@ func (t *Tailnet) logout(ctx context.Context) error {
 }
 
 // Resolve looks name up the way this tailnet's own client would.
-// Split-DNS names go straight to the tailnet's resolvers, dialed through
-// this node: tsnet's built-in forwarder sends UDP over the host network,
-// which can't reach a resolver that only exists inside the tailnet.
+// Split-DNS names, and with local DNS overridden all other names, go
+// straight to the tailnet's resolvers, dialed through this node: tsnet's
+// built-in forwarder sends UDP over the host network, which can't reach
+// a resolver that only exists inside the tailnet.
 // Everything else (MagicDNS, ExtraRecords) uses the node's resolver.
 func (t *Tailnet) Resolve(ctx context.Context, name string) ([]netip.Addr, error) {
 	if res := t.splitResolvers(name); len(res) > 0 && !t.ownName(name) {
@@ -523,15 +534,21 @@ func usefulSplitDomain(dom, suffix string) bool {
 	return true
 }
 
+// globalResolvers keys the OverrideDNS nameservers in splitRes.
+const globalResolvers = ""
+
 func (t *Tailnet) splitResolvers(name string) []netip.AddrPort {
 	name = normName(name)
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	var best string
-	for dom := range t.splitRes {
+	best := globalResolvers
+	for _, dom := range t.snap.SplitDNS {
 		if hasSuffixDomain(name, dom) && len(dom) > len(best) {
 			best = dom
 		}
+	}
+	if best == globalResolvers && t.exitWant != "" {
+		return nil // the exit node's resolver, as in Tailscale
 	}
 	return t.splitRes[best]
 }

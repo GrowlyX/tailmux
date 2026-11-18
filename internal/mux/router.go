@@ -17,6 +17,8 @@ type Snapshot struct {
 	SplitDNS []string // split-DNS domains the tailnet's resolver owns
 	Peers    []Peer
 	Running  bool
+	// OverrideDNS: the tailnet's global nameservers answer every name.
+	OverrideDNS bool
 	// Reconnecting: enabled and logged in but not Running right now (the
 	// minutes after waking from sleep). It keeps its routes and names so
 	// nothing falls through to the public internet or gets cached as

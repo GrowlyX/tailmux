@@ -475,10 +475,10 @@ func (e *Engine) answerDNS(query []byte, network string) []byte {
 				answers, ttl = e.addrsFor(name, tgt.Tailnet, tgt.IPs)
 			}
 		}
-	} else if e.m.ExitNode() != nil {
-		// With an exit node the OS may send every name here ("~." on
-		// Linux, "." on Windows): answer with real addresses, looked up
-		// by the exit node's resolver.
+	} else if e.m.TakesAllDNS() {
+		// The OS may send every name here ("~." on Linux, "." on Windows,
+		// a default resolver on macOS): answer with real addresses, looked
+		// up by the exit node's or the overriding tailnet's resolver.
 		rh.Authoritative = false
 		rh.RCode = dnsmessage.RCodeSuccess
 		if q.Type == dnsmessage.TypeA || q.Type == dnsmessage.TypeAAAA {
