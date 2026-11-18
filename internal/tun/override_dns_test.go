@@ -3,6 +3,7 @@ package tun
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/netip"
 	"testing"
 	"time"
@@ -27,7 +28,8 @@ func TestOverrideLocalDNS(t *testing.T) {
 
 	answer := netip.MustParseAddr("203.0.113.53")
 	f := lab.NewTailnet(t, "override")
-	f.GlobalDNS(t, ctx, "corp.internal", answer)
+	const zone = "corp.internal"
+	f.GlobalDNS(t, ctx, zone, answer)
 	cfg := &mux.Config{StateDir: t.TempDir(), Hostname: "tailmux", Tailnets: []mux.TailnetConfig{{Name: "override", ControlURL: f.URL, Ephemeral: true}}}
 	if err := cfg.Normalize(); err != nil {
 		t.Fatal(err)
@@ -40,10 +42,10 @@ func TestOverrideLocalDNS(t *testing.T) {
 	e := &Engine{m: m, fake: NewFakeIPs(netip.MustParsePrefix(cfg.TUN.Range), "")}
 
 	const id = 42
-	ask := func(qt dnsmessage.Type) ([]dnsmessage.Resource, error) {
+	ask := func(name string, qt dnsmessage.Type) ([]dnsmessage.Resource, error) {
 		b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: id, RecursionDesired: true})
 		b.StartQuestions()
-		b.Question(dnsmessage.Question{Name: dnsmessage.MustNewName("db.corp.internal."), Type: qt, Class: dnsmessage.ClassINET})
+		b.Question(dnsmessage.Question{Name: dnsmessage.MustNewName(name), Type: qt, Class: dnsmessage.ClassINET})
 		q, _ := b.Finish()
 		var p dnsmessage.Parser
 		h, err := p.Start(e.answerDNS(q, "udp"))
@@ -58,7 +60,7 @@ func TestOverrideLocalDNS(t *testing.T) {
 		return as, nil
 	}
 	lab.Eventually(t, "the tailnet's nameserver answers every name", 90*time.Second, func() error {
-		as, err := ask(dnsmessage.TypeA)
+		as, err := ask("db.corp.internal.", dnsmessage.TypeA)
 		if err != nil {
 			return err
 		}
@@ -67,7 +69,54 @@ func TestOverrideLocalDNS(t *testing.T) {
 		}
 		return nil
 	})
-	if _, err := ask(dnsmessage.TypeTXT); err != nil {
+	txt := func(name string) string {
+		t.Helper()
+		as, err := ask(name, dnsmessage.TypeTXT)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return as[0].Body.(*dnsmessage.TXTResource).TXT[0]
+	}
+	if got := txt("db.corp.internal."); got != zone {
+		t.Errorf("TXT %q, want the tailnet nameserver's", got)
+	}
+	// Local names stay on the local network, whatever the record type.
+	const lanTXT = "lan"
+	lan := serveTXT(t, lanTXT)
+	m.SetLocalDNS(func() []netip.AddrPort { return []netip.AddrPort{lan} })
+	if got := txt("printer.home.arpa."); got != lanTXT {
+		t.Errorf("local name's TXT %q, want the local nameserver's", got)
+	}
+}
+
+// serveTXT answers every query on a local UDP port with one TXT record.
+func serveTXT(t *testing.T, txt string) netip.AddrPort {
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { pc.Close() })
+	go func() {
+		buf := make([]byte, 1500)
+		for {
+			n, addr, err := pc.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			var p dnsmessage.Parser
+			h, err := p.Start(buf[:n])
+			if err != nil {
+				continue
+			}
+			q, _ := p.Question()
+			b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: h.ID, Response: true})
+			b.StartQuestions()
+			b.Question(q)
+			b.StartAnswers()
+			b.TXTResource(dnsmessage.ResourceHeader{Name: q.Name, Class: dnsmessage.ClassINET}, dnsmessage.TXTResource{TXT: []string{txt}})
+			out, _ := b.Finish()
+			pc.WriteTo(out, addr)
+		}
+	}()
+	return netip.MustParseAddrPort(pc.LocalAddr().String())
 }

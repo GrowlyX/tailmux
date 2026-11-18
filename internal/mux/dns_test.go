@@ -2,6 +2,7 @@ package mux
 
 import (
 	"context"
+	"errors"
 	"net/netip"
 	"sync/atomic"
 	"testing"
@@ -24,5 +25,10 @@ func TestLocalDNSForLocalNames(t *testing.T) {
 		if asked.Load() != want {
 			t.Errorf("%s: local nameservers asked = %v, want %v", host, !want, want)
 		}
+	}
+	// Unknown nameservers: the OS would send the name back here.
+	m.SetLocalDNS(func() []netip.AddrPort { return nil })
+	if _, err := m.Resolve(context.Background(), "printer.home.arpa"); !errors.Is(err, ErrNoLocalDNS) {
+		t.Errorf("no local nameservers: %v, want %v", err, ErrNoLocalDNS)
 	}
 }

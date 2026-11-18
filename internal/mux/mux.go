@@ -308,6 +308,24 @@ func (m *Mux) TakesAllDNS() bool {
 // while the OS would send them back here; nil hands them to the OS again.
 func (m *Mux) SetLocalDNS(servers func() []netip.AddrPort) { m.localDNS.Store(&servers) }
 
+// LocalDNS lists the local network's nameservers; ok is false when the OS
+// can answer local names itself.
+func (m *Mux) LocalDNS() (servers []netip.AddrPort, ok bool) {
+	f := m.localDNS.Load()
+	if f == nil || *f == nil {
+		return nil, false
+	}
+	return (*f)(), true
+}
+
+// IsLocalName reports whether host belongs to the local network, so never
+// goes to a tailnet's resolver.
+func IsLocalName(host string) bool { return localName(host) }
+
+// ErrNoLocalDNS means the local network's nameservers are unknown while
+// the OS would send local names back here.
+var ErrNoLocalDNS = errors.New("no local nameservers")
+
 func (m *Mux) lookupSystem(ctx context.Context, host string) ([]netip.Addr, error) {
 	key := "|" + host
 	if ips, ok := m.cached(key); ok {
@@ -327,12 +345,17 @@ func (m *Mux) lookupSystem(ctx context.Context, host string) ([]netip.Addr, erro
 // systemLookup skips the OS for local DNS while it would loop; mDNS names
 // never come back to tailmux, and only the OS speaks mDNS.
 func (m *Mux) systemLookup(ctx context.Context, host string) ([]netip.Addr, error) {
-	if f := m.localDNS.Load(); f != nil && *f != nil && !hasSuffixDomain(normName(host), mdnsDomain) {
-		if servers := (*f)(); len(servers) > 0 {
-			return lookupVia(ctx, host, servers, DialDirect)
-		}
+	if hasSuffixDomain(normName(host), mdnsDomain) {
+		return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 	}
-	return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	servers, ok := m.LocalDNS()
+	switch {
+	case !ok:
+		return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	case len(servers) == 0:
+		return nil, ErrNoLocalDNS
+	}
+	return lookupVia(ctx, host, servers, DialDirect)
 }
 
 // DialFunc dials a nameserver.

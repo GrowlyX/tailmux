@@ -395,6 +395,14 @@ var errNoDNSAnswer = errors.New("no DNS answer")
 // queryUnclaimed asks the resolver Resolve would use for a name no
 // tailnet claims.
 func (e *Engine) queryUnclaimed(ctx context.Context, query []byte, network string, q dnsmessage.Question) ([]byte, error) {
+	name := q.Name.String()
+	if mux.IsLocalName(name) {
+		servers, _ := e.m.LocalDNS()
+		if len(servers) == 0 {
+			return nil, mux.ErrNoLocalDNS
+		}
+		return forwardOrFail(query, network, servers, mux.DialDirect)
+	}
 	t, err := e.m.UnclaimedTailnet()
 	if err != nil {
 		return nil, err
@@ -402,12 +410,8 @@ func (e *Engine) queryUnclaimed(ctx context.Context, query []byte, network strin
 	if t == nil {
 		return nil, errNoDNSAnswer
 	}
-	name := q.Name.String()
 	if servers := t.Resolvers(name); len(servers) > 0 {
-		if resp := forwardDNS(query, network, servers, t.DialResolver); resp != nil {
-			return resp, nil
-		}
-		return nil, errNoDNSAnswer
+		return forwardOrFail(query, network, servers, t.DialResolver)
 	}
 	resp, err := t.QueryDNS(ctx, name, q.Type)
 	if err != nil {
@@ -418,6 +422,13 @@ func (e *Engine) queryUnclaimed(ctx context.Context, query []byte, network strin
 	}
 	copy(resp, query[:dnsIDLen]) // answer with the client's ID
 	return resp, nil
+}
+
+func forwardOrFail(query []byte, network string, servers []netip.AddrPort, dial mux.DialFunc) ([]byte, error) {
+	if resp := forwardDNS(query, network, servers, dial); resp != nil {
+		return resp, nil
+	}
+	return nil, errNoDNSAnswer
 }
 
 // forwardDNS passes a query unchanged to the first upstream that

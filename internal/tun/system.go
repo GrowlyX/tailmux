@@ -520,7 +520,7 @@ func (s *System) reconcileLocked(force bool) {
 	if s.cfg.TUN.NoDNS || (!force && slices.Equal(domains, s.domains) && slices.Equal(searchDomains, s.searchDomains)) {
 		return
 	}
-	// On before the OS sends every name here; off only once it stops.
+	// On before the OS sends every name here; off once it doesn't.
 	allDNS := slices.Contains(domains, rootDomain)
 	if allDNS {
 		s.useLocalDNS(true)
@@ -530,7 +530,7 @@ func (s *System) reconcileLocked(force bool) {
 		log.Printf("tun: dns: %v", err)
 		return
 	}
-	if !allDNS {
+	if !allDNS || !ok {
 		s.useLocalDNS(false)
 	}
 	searchChanged := !slices.Equal(searchDomains, s.searchDomains)
