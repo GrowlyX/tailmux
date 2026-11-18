@@ -243,6 +243,21 @@ func (l linuxOS) dnsUpstreams() []netip.AddrPort {
 	return l.rc.dnsUpstreams()
 }
 
+// resolvedConf lists the nameservers systemd-resolved sends names to,
+// tailmux's among them.
+var resolvedConf = "/run/systemd/resolve/resolv.conf"
+
+// localDNS lists the network's own nameservers: the ones /etc/resolv.conf
+// had before tailmux took it over, or else resolved's.
+func (l linuxOS) localDNS(self netip.Addr) []netip.AddrPort {
+	if ups := l.dnsUpstreams(); len(ups) > 0 {
+		return ups
+	}
+	b, _ := os.ReadFile(resolvedConf)
+	ups, _ := parseResolvConf(b, self)
+	return ups
+}
+
 func (linuxOS) flushDNS() {
 	if resolvedRunning() {
 		exec.Command("resolvectl", "flush-caches").Run()

@@ -235,6 +235,9 @@ func (f *Tailnet) SplitDNS(t *testing.T, ctx context.Context, zone string, answe
 				}
 				b.AResource(dnsmessage.ResourceHeader{Name: q.Name, Class: dnsmessage.ClassINET, TTL: 60}, dnsmessage.AResource{A: a})
 			}
+			if q.Type == dnsmessage.TypeTXT {
+				b.TXTResource(dnsmessage.ResourceHeader{Name: q.Name, Class: dnsmessage.ClassINET, TTL: 60}, dnsmessage.TXTResource{TXT: []string{zone}})
+			}
 			out, _ := b.Finish()
 			pc.WriteTo(out, addr)
 		}

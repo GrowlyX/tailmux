@@ -384,15 +384,53 @@ func writeDNSTCP(w io.Writer, msg []byte) error {
 	return err
 }
 
+// maxUDPDNS is the most a DNS answer over UDP may carry without EDNS.
+const maxUDPDNS = 512
+
+// dnsIDLen is the length of the ID that starts every DNS message.
+const dnsIDLen = 2
+
+var errNoDNSAnswer = errors.New("no DNS answer")
+
+// queryUnclaimed asks the resolver Resolve would use for a name no
+// tailnet claims.
+func (e *Engine) queryUnclaimed(ctx context.Context, query []byte, network string, q dnsmessage.Question) ([]byte, error) {
+	t, err := e.m.UnclaimedTailnet()
+	if err != nil {
+		return nil, err
+	}
+	if t == nil {
+		return nil, errNoDNSAnswer
+	}
+	name := q.Name.String()
+	if servers := t.Resolvers(name); len(servers) > 0 {
+		if resp := forwardDNS(query, network, servers, t.DialResolver); resp != nil {
+			return resp, nil
+		}
+		return nil, errNoDNSAnswer
+	}
+	resp, err := t.QueryDNS(ctx, name, q.Type)
+	if err != nil {
+		return nil, err
+	}
+	if len(resp) < dnsIDLen {
+		return nil, errNoDNSAnswer
+	}
+	copy(resp, query[:dnsIDLen]) // answer with the client's ID
+	return resp, nil
+}
+
 // forwardDNS passes a query unchanged to the first upstream that
 // answers, over network ("udp" or "tcp"). A truncated UDP answer goes
 // back as it is; the client then asks again over TCP.
-func forwardDNS(query []byte, network string, upstreams []netip.AddrPort) []byte {
+func forwardDNS(query []byte, network string, upstreams []netip.AddrPort, dial mux.DialFunc) []byte {
 	if len(query) < 2 {
 		return nil
 	}
 	for _, up := range upstreams {
-		c, err := net.DialTimeout(network, up.String(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		c, err := dial(ctx, network, up)
+		cancel()
 		if err != nil {
 			continue
 		}
@@ -477,14 +515,14 @@ func (e *Engine) answerDNS(query []byte, network string) []byte {
 		}
 	} else if e.m.TakesAllDNS() {
 		// The OS may send every name here ("~." on Linux, "." on Windows,
-		// a default resolver on macOS): answer with real addresses, looked
-		// up by the exit node's or the overriding tailnet's resolver.
+		// a default resolver on macOS): answer from the exit node's or the
+		// overriding tailnet's resolver, with real addresses.
 		rh.Authoritative = false
 		rh.RCode = dnsmessage.RCodeSuccess
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		if q.Type == dnsmessage.TypeA || q.Type == dnsmessage.TypeAAAA {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			tgt, err := e.m.Resolve(ctx, name)
-			cancel()
 			switch {
 			case err != nil && mux.IsNotFound(err):
 				rh.RCode = dnsmessage.RCodeNameError
@@ -493,12 +531,19 @@ func (e *Engine) answerDNS(query []byte, network string) []byte {
 			default:
 				answers = tgt.IPs
 			}
+		} else if resp, err := e.queryUnclaimed(ctx, query, network, q); err == nil {
+			if network == "tcp" || len(resp) <= maxUDPDNS {
+				return resp
+			}
+			rh.Truncated = true
+		} else if !errors.Is(err, mux.ErrUnsupportedQuery) {
+			rh.RCode = dnsmessage.RCodeServerFailure
 		}
-		// Other types get an empty answer: not NXDOMAIN, which resolvers
-		// would apply to the name's A records too.
+		// Types the resolver can't look up get an empty answer: not
+		// NXDOMAIN, which resolvers would apply to the name's A records too.
 	} else if e.upstreams != nil {
 		if ups := e.upstreams(); len(ups) > 0 {
-			if resp := forwardDNS(query, network, ups); resp != nil {
+			if resp := forwardDNS(query, network, ups, mux.DialDirect); resp != nil {
 				return resp
 			}
 			rh.Authoritative = false

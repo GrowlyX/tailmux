@@ -2,11 +2,9 @@ package tun
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"log"
-	"net"
 	"net/netip"
 	"os"
 	"os/exec"
@@ -37,7 +35,10 @@ const resolverMarker = "# managed by tailmux; removed when it stops\n"
 // match domain ranks it ahead of the network's own resolver.
 const defaultResolverKey = "State:/Network/Service/tailmux/DNS"
 
-const primaryIPv4Key = "State:/Network/Global/IPv4"
+const (
+	primaryIPv4Key = "State:/Network/Global/IPv4"
+	primaryIPv6Key = "State:/Network/Global/IPv6"
+)
 
 const dnsPort = 53
 
@@ -260,7 +261,7 @@ func (d darwinOS) dnsIntact(_ string, domains, searchDomains []string) bool {
 	}
 	for _, dom := range domains {
 		if dom == rootDomain {
-			if !scutilAddr(runScutil("show " + defaultResolverKey)).IsValid() {
+			if len(scutilServers(runScutil("show "+defaultResolverKey))) == 0 {
 				return false
 			}
 			continue
@@ -342,28 +343,31 @@ func scutilField(out, key string) string {
 	return ""
 }
 
-// scutilAddr is the first server in a DNS dictionary scutil printed.
-func scutilAddr(out string) netip.Addr {
-	_, servers, _ := strings.Cut(out, "ServerAddresses")
-	ip, _ := netip.ParseAddr(scutilField(servers, "0"))
-	return ip
-}
-
-// localDNS is the primary network service's own DNS server: set by hand
-// (Setup) or else by DHCP (State).
-func localDNS() netip.Addr {
-	service := scutilField(runScutil("show "+primaryIPv4Key), "PrimaryService")
-	if ip := scutilAddr(runScutil("show Setup:/Network/Service/" + service + "/DNS")); ip.IsValid() {
-		return ip
+// scutilServers are the servers in a DNS dictionary scutil printed.
+func scutilServers(out string) []netip.AddrPort {
+	_, list, _ := strings.Cut(out, "ServerAddresses")
+	list, _, _ = strings.Cut(list, "}")
+	var servers []netip.AddrPort
+	for _, line := range strings.Split(list, "\n") {
+		_, v, _ := strings.Cut(line, " : ")
+		if ip, err := netip.ParseAddr(strings.TrimSpace(v)); err == nil {
+			servers = append(servers, netip.AddrPortFrom(ip, dnsPort))
+		}
 	}
-	return scutilAddr(runScutil("show State:/Network/Service/" + service + "/DNS"))
+	return servers
 }
 
-func (darwinOS) localResolver() *net.Resolver {
-	return &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-		var d net.Dialer
-		return d.DialContext(ctx, network, netip.AddrPortFrom(localDNS(), dnsPort).String())
-	}}
+// localDNS lists the primary network service's own DNS servers: set by
+// hand (Setup) or else by DHCP (State).
+func (darwinOS) localDNS(netip.Addr) []netip.AddrPort {
+	service := scutilField(runScutil("show "+primaryIPv4Key), "PrimaryService")
+	if service == "" {
+		service = scutilField(runScutil("show "+primaryIPv6Key), "PrimaryService")
+	}
+	if servers := scutilServers(runScutil("show Setup:/Network/Service/" + service + "/DNS")); len(servers) > 0 {
+		return servers
+	}
+	return scutilServers(runScutil("show State:/Network/Service/" + service + "/DNS"))
 }
 
 // Routes on a utun disappear with it; the scoped default routes,

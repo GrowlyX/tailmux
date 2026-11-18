@@ -324,7 +324,7 @@ func TestDarwinDefaultResolver(t *testing.T) {
 	server := netip.MustParseAddr("198.18.0.53")
 	all := []string{"work", rootDomain}
 
-	if ok, err := d.setDNS("utun9", all, nil, server); !ok || err != nil || scutilAddr(store[defaultResolverKey]) != server {
+	if ok, err := d.setDNS("utun9", all, nil, server); !ok || err != nil || !slices.Equal(scutilServers(store[defaultResolverKey]), []netip.AddrPort{netip.AddrPortFrom(server, dnsPort)}) {
 		t.Fatalf("setDNS = %v, %v; default resolver %q", ok, err, store[defaultResolverKey])
 	}
 	if !strings.Contains(store[defaultResolverKey], `SupplementalMatchDomains : <array> {
@@ -347,15 +347,25 @@ func TestDarwinDefaultResolver(t *testing.T) {
 
 func TestDarwinLocalDNS(t *testing.T) {
 	store := useFakeDynamicStore(t)
-	store[primaryIPv4Key] = "<dictionary> {\n  PrimaryInterface : en0\n  PrimaryService : B6F2\n}"
-	store["State:/Network/Service/B6F2/DNS"] = "SearchDomains : <array> {\n  0 : localdomain\n}\nServerAddresses : <array> {\n  0 : 192.168.10.1\n}"
+	d := darwinOS{}
+	self := netip.MustParseAddr("198.18.0.53")
+	servers := func(addrs ...string) []netip.AddrPort {
+		var out []netip.AddrPort
+		for _, a := range addrs {
+			out = append(out, netip.AddrPortFrom(netip.MustParseAddr(a), dnsPort))
+		}
+		return out
+	}
+	// An IPv6-only network has no IPv4 primary service.
+	store[primaryIPv6Key] = "<dictionary> {\n  PrimaryInterface : en0\n  PrimaryService : B6F2\n}"
+	store["State:/Network/Service/B6F2/DNS"] = "SearchDomains : <array> {\n  0 : localdomain\n}\nServerAddresses : <array> {\n  0 : 2001:db8::53\n  1 : 2001:db8::54\n}"
 	// With tailmux as the default resolver, the global entry is tailmux.
 	store["State:/Network/Global/DNS"] = "ServerAddresses : <array> {\n  0 : 198.18.0.53\n}"
-	if got := localDNS(); got != netip.MustParseAddr("192.168.10.1") {
+	if got := d.localDNS(self); !slices.Equal(got, servers("2001:db8::53", "2001:db8::54")) {
 		t.Fatalf("localDNS = %v; want the primary service's", got)
 	}
 	store["Setup:/Network/Service/B6F2/DNS"] = "ServerAddresses : <array> {\n  0 : 9.9.9.9\n}"
-	if got := localDNS(); got != netip.MustParseAddr("9.9.9.9") {
+	if got := d.localDNS(self); !slices.Equal(got, servers("9.9.9.9")) {
 		t.Fatalf("localDNS = %v; want the one set by hand", got)
 	}
 }

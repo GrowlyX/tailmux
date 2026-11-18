@@ -481,7 +481,7 @@ func (t *Tailnet) logout(ctx context.Context) error {
 // a resolver that only exists inside the tailnet.
 // Everything else (MagicDNS, ExtraRecords) uses the node's resolver.
 func (t *Tailnet) Resolve(ctx context.Context, name string) ([]netip.Addr, error) {
-	if res := t.splitResolvers(name); len(res) > 0 && !t.ownName(name) {
+	if res := t.Resolvers(name); len(res) > 0 {
 		return t.resolveVia(ctx, name, res)
 	}
 	var out []netip.Addr
@@ -537,7 +537,12 @@ func usefulSplitDomain(dom, suffix string) bool {
 // globalResolvers keys the OverrideDNS nameservers in splitRes.
 const globalResolvers = ""
 
-func (t *Tailnet) splitResolvers(name string) []netip.AddrPort {
+// Resolvers are the nameservers Resolve sends name to; none when the
+// node's own resolver answers, as it does names with an exit node set.
+func (t *Tailnet) Resolvers(name string) []netip.AddrPort {
+	if t.ownName(name) {
+		return nil
+	}
 	name = normName(name)
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -548,31 +553,52 @@ func (t *Tailnet) splitResolvers(name string) []netip.AddrPort {
 		}
 	}
 	if best == globalResolvers && t.exitWant != "" {
-		return nil // the exit node's resolver, as in Tailscale
+		return nil
 	}
 	return t.splitRes[best]
 }
 
 func (t *Tailnet) resolveVia(ctx context.Context, name string, resolvers []netip.AddrPort) ([]netip.Addr, error) {
-	var lastErr error
-	for _, ap := range resolvers {
-		r := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			if t.owns(ap.Addr()) {
-				return t.srv.Dial(ctx, network, ap.String())
-			}
-			var d net.Dialer
-			return d.DialContext(ctx, network, ap.String())
-		}}
-		ips, err := r.LookupNetIP(ctx, "ip", name)
-		if err == nil && len(ips) > 0 {
-			for i := range ips {
-				ips[i] = ips[i].Unmap()
-			}
-			return ips, nil
-		}
-		lastErr = err
+	ips, err := lookupVia(ctx, name, resolvers, t.DialResolver)
+	if err != nil {
+		return nil, fmt.Errorf("%s via %s split DNS: %w", name, t.cfg.Name, err)
 	}
-	return nil, fmt.Errorf("%s via %s split DNS: %w", name, t.cfg.Name, lastErr)
+	return ips, nil
+}
+
+// DialResolver dials a nameserver, through this node if it's inside the
+// tailnet.
+func (t *Tailnet) DialResolver(ctx context.Context, network string, ap netip.AddrPort) (net.Conn, error) {
+	if t.owns(ap.Addr()) {
+		return t.srv.Dial(ctx, network, ap.String())
+	}
+	return DialDirect(ctx, network, ap)
+}
+
+// queryDNSTypes are the record types the node's resolver takes, beyond
+// addresses, as tailscale's local API names them.
+var queryDNSTypes = map[dnsmessage.Type]string{
+	dnsmessage.TypeCNAME: "CNAME",
+	dnsmessage.TypeMX:    "MX",
+	dnsmessage.TypeNS:    "NS",
+	dnsmessage.TypePTR:   "PTR",
+	dnsmessage.TypeSOA:   "SOA",
+	dnsmessage.TypeSRV:   "SRV",
+	dnsmessage.TypeTXT:   "TXT",
+}
+
+// ErrUnsupportedQuery means the node's resolver can't look up a record
+// type.
+var ErrUnsupportedQuery = errors.New("record type not supported")
+
+// QueryDNS asks the node's own resolver, returning its raw answer.
+func (t *Tailnet) QueryDNS(ctx context.Context, name string, qt dnsmessage.Type) ([]byte, error) {
+	s, ok := queryDNSTypes[qt]
+	if !ok {
+		return nil, ErrUnsupportedQuery
+	}
+	b, _, err := t.lc.QueryDNS(ctx, name, s)
+	return b, err
 }
 
 // Owns reports whether ip is reachable through this tailnet.

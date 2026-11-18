@@ -163,7 +163,7 @@ func (d *systemDevice) Close() error {
 	s.dev = nil
 	s.dnsActive = false
 	s.exit = false
-	s.useLocalResolver(false)
+	s.useLocalDNS(false)
 	s.publishState()
 	s.domains = nil
 	s.routedNow.Store(nil)
@@ -523,7 +523,7 @@ func (s *System) reconcileLocked(force bool) {
 	// On before the OS sends every name here; off only once it stops.
 	allDNS := slices.Contains(domains, rootDomain)
 	if allDNS {
-		s.useLocalResolver(true)
+		s.useLocalDNS(true)
 	}
 	ok, err := s.os.setDNS(ifname, domains, searchDomains, s.fake.DNS())
 	if err != nil {
@@ -531,7 +531,7 @@ func (s *System) reconcileLocked(force bool) {
 		return
 	}
 	if !allDNS {
-		s.useLocalResolver(false)
+		s.useLocalDNS(false)
 	}
 	searchChanged := !slices.Equal(searchDomains, s.searchDomains)
 	s.domains, s.searchDomains, s.dnsActive = domains, searchDomains, ok
@@ -546,16 +546,19 @@ func (s *System) reconcileLocked(force bool) {
 
 const rootDomain = "."
 
-// localResolverOS can reach the local network's resolver while the OS
-// sends every name here.
-type localResolverOS interface{ localResolver() *net.Resolver }
+// localDNSOS can name the local network's nameservers while the OS sends
+// every name here.
+type localDNSOS interface {
+	localDNS(self netip.Addr) []netip.AddrPort
+}
 
-func (s *System) useLocalResolver(on bool) {
-	var r *net.Resolver
-	if lr, ok := s.os.(localResolverOS); ok && on {
-		r = lr.localResolver()
+func (s *System) useLocalDNS(on bool) {
+	var servers func() []netip.AddrPort
+	if l, ok := s.os.(localDNSOS); ok && on {
+		self := s.fake.DNS()
+		servers = func() []netip.AddrPort { return l.localDNS(self) }
 	}
-	s.m.SetSystemResolver(r)
+	s.m.SetLocalDNS(servers)
 }
 
 func (s *System) Close() error {
