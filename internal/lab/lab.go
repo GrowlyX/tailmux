@@ -186,20 +186,33 @@ func (f *Tailnet) wake() {
 	}
 }
 
-// splitDNS runs a resolver node answering *.<zone> with answer, and
+// SplitDNS runs a resolver node answering *.<zone> with answer, and
 // tells control to route that zone to it.
+func (f *Tailnet) SplitDNS(t *testing.T, ctx context.Context, zone string, answer netip.Addr) {
+	f.resolver(t, ctx, zone, answer, func(r []*dnstype.Resolver) *tailcfg.DNSConfig {
+		// Real tailnets also carry a "ts.net" route; it must not make
+		// tailmux think this tailnet owns every *.ts.net name.
+		return &tailcfg.DNSConfig{Proxied: true, Routes: map[string][]*dnstype.Resolver{zone: r, "ts.net": r}}
+	})
+}
+
+// GlobalDNS is SplitDNS with the resolver as the tailnet's global
+// nameserver (local DNS overridden) instead of zone's.
+func (f *Tailnet) GlobalDNS(t *testing.T, ctx context.Context, zone string, answer netip.Addr) {
+	f.resolver(t, ctx, zone, answer, func(r []*dnstype.Resolver) *tailcfg.DNSConfig {
+		return &tailcfg.DNSConfig{Proxied: true, Resolvers: r}
+	})
+}
+
+// resolver runs a resolver node answering *.<zone> with answer, under the
+// DNS config cfg makes for it.
 //
 // It must run before any other node joins: testcontrol's DNSConfig has
 // no lock, so it's set up front with the address control hands the
 // first node, and checked afterwards.
-func (f *Tailnet) SplitDNS(t *testing.T, ctx context.Context, zone string, answer netip.Addr) {
+func (f *Tailnet) resolver(t *testing.T, ctx context.Context, zone string, answer netip.Addr, cfg func([]*dnstype.Resolver) *tailcfg.DNSConfig) {
 	want := netip.MustParseAddr("100.64.0.1")
-	f.Control.DNSConfig = &tailcfg.DNSConfig{
-		Proxied: true,
-		// Real tailnets also carry a "ts.net" route; it must not make
-		// tailmux think this tailnet owns every *.ts.net name.
-		Routes: map[string][]*dnstype.Resolver{zone: {{Addr: want.String()}}, "ts.net": {{Addr: want.String()}}},
-	}
+	f.Control.DNSConfig = cfg([]*dnstype.Resolver{{Addr: want.String()}})
 	s, ip := f.Node(t, ctx, "resolver")
 	if ip != want {
 		t.Fatalf("resolver got %v, want %v", ip, want)
@@ -242,13 +255,6 @@ func (f *Tailnet) SplitDNS(t *testing.T, ctx context.Context, zone string, answe
 			pc.WriteTo(out, addr)
 		}
 	}()
-}
-
-// GlobalDNS is SplitDNS with the resolver as the tailnet's global
-// nameserver (local DNS overridden) instead of zone's.
-func (f *Tailnet) GlobalDNS(t *testing.T, ctx context.Context, zone string, answer netip.Addr) {
-	f.SplitDNS(t, ctx, zone, answer)
-	f.Control.DNSConfig = &tailcfg.DNSConfig{Proxied: true, Resolvers: f.Control.DNSConfig.Routes[zone]}
 }
 
 // Start brings up three tailnets that deliberately collide: every
