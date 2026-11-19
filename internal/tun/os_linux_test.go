@@ -4,6 +4,8 @@ import (
 	"net/netip"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -141,5 +143,19 @@ func TestBypassRules(t *testing.T) {
 				t.Errorf("ip %s: another program's rule %q removed:\n%s", fam, other, out)
 			}
 		}
+	}
+}
+
+// TestLinuxLocalDNS leaves tailmux out of resolved's nameservers.
+func TestLinuxLocalDNS(t *testing.T) {
+	old := resolvedConf
+	resolvedConf = filepath.Join(t.TempDir(), "resolv.conf")
+	t.Cleanup(func() { resolvedConf = old })
+	if err := os.WriteFile(resolvedConf, []byte("nameserver 198.18.0.53\nnameserver 192.168.1.1\nsearch lan\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want := []netip.AddrPort{netip.MustParseAddrPort("192.168.1.1:53")}
+	if got := (linuxOS{}).localDNS(netip.MustParseAddr("198.18.0.53")); !slices.Equal(got, want) {
+		t.Fatalf("localDNS = %v, want %v", got, want)
 	}
 }

@@ -67,6 +67,11 @@ func (r *resolvConf) set(server netip.Addr) error {
 		}
 	}
 	upstreams, keep := parseResolvConf(orig, server)
+	if len(upstreams) == 0 {
+		// The original lists only tailmux: on macOS, configd while
+		// tailmux is the default resolver, or just after.
+		upstreams = r.upstreams
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s; the original is %s and comes back when tailmux stops.\n", resolvConfMarker, r.backup)
 	fmt.Fprintf(&b, "# Tailnet names are answered by tailmux, the rest by the nameservers listed there.\n")

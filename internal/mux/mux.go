@@ -17,6 +17,8 @@ import (
 // Version is the running build, reported in /status.
 var Version = "dev"
 
+const mdnsDomain = "local"
+
 // Mux joins every configured tailnet at once and routes each connection
 // to the tailnet that owns its destination.
 type Mux struct {
@@ -40,8 +42,9 @@ type Mux struct {
 	Restart func()
 	direct  net.Dialer
 
-	cacheMu sync.Mutex
-	cache   map[string]cacheEntry
+	cacheMu  sync.Mutex
+	cache    map[string]cacheEntry
+	localDNS atomic.Pointer[func() []netip.AddrPort]
 
 	// TUNStatus, if set, adds TUN details to /status.
 	TUNStatus func() any
@@ -260,24 +263,75 @@ func (m *Mux) resolveIn(ctx context.Context, t *Tailnet, name string) ([]netip.A
 
 // lookupUnclaimed resolves a name no tailnet claims: with the exit
 // node's resolver when one is set, so lookups don't leak to the local
-// network and answers fit where traffic comes out, else the system's.
+// network and answers fit where traffic comes out, else, like the
+// official client, a tailnet's that overrides local DNS, else the
+// system's.
 func (m *Mux) lookupUnclaimed(ctx context.Context, host string) ([]netip.Addr, error) {
-	if m.ExitNode() == nil || localName(host) {
+	if localName(host) {
 		return m.lookupSystem(ctx, host)
 	}
-	t, err := m.exitTailnet()
+	t, err := m.UnclaimedTailnet()
 	if err != nil {
 		return nil, err
 	}
+	if t == nil {
+		return m.lookupSystem(ctx, host)
+	}
 	return m.resolveIn(ctx, t, host)
 }
+
+// UnclaimedTailnet is the tailnet whose resolver answers names no tailnet
+// claims; nil for the system's.
+func (m *Mux) UnclaimedTailnet() (*Tailnet, error) {
+	if m.ExitNode() != nil {
+		return m.exitTailnet()
+	}
+	return m.overrideDNSTailnet(), nil
+}
+
+// overrideDNSTailnet is the first tailnet that overrides local DNS.
+func (m *Mux) overrideDNSTailnet() *Tailnet {
+	for _, t := range m.list() {
+		if s := t.Snapshot(); s.active() && s.OverrideDNS {
+			return t
+		}
+	}
+	return nil
+}
+
+// TakesAllDNS reports whether the OS should send every name here.
+func (m *Mux) TakesAllDNS() bool {
+	return m.ExitNode() != nil || m.overrideDNSTailnet() != nil
+}
+
+// SetLocalDNS names the local network's nameservers, for local names
+// while the OS would send them back here; nil hands them to the OS again.
+func (m *Mux) SetLocalDNS(servers func() []netip.AddrPort) { m.localDNS.Store(&servers) }
+
+// LocalDNS lists the local network's nameservers; ok is false when the OS
+// can answer local names itself.
+func (m *Mux) LocalDNS() (servers []netip.AddrPort, ok bool) {
+	f := m.localDNS.Load()
+	if f == nil || *f == nil {
+		return nil, false
+	}
+	return (*f)(), true
+}
+
+// IsLocalName reports whether host belongs to the local network, so never
+// goes to a tailnet's resolver.
+func IsLocalName(host string) bool { return localName(host) }
+
+// ErrNoLocalDNS means the local network's nameservers are unknown while
+// the OS would send local names back here.
+var ErrNoLocalDNS = errors.New("no local nameservers")
 
 func (m *Mux) lookupSystem(ctx context.Context, host string) ([]netip.Addr, error) {
 	key := "|" + host
 	if ips, ok := m.cached(key); ok {
 		return ips, nil
 	}
-	ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	ips, err := m.systemLookup(ctx, host)
 	if err != nil {
 		return nil, err
 	}
@@ -286,6 +340,50 @@ func (m *Mux) lookupSystem(ctx context.Context, host string) ([]netip.Addr, erro
 	}
 	m.store(key, ips)
 	return ips, nil
+}
+
+// systemLookup skips the OS for local DNS while it would loop; mDNS names
+// never come back to tailmux, and only the OS speaks mDNS.
+func (m *Mux) systemLookup(ctx context.Context, host string) ([]netip.Addr, error) {
+	if hasSuffixDomain(normName(host), mdnsDomain) {
+		return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	}
+	servers, ok := m.LocalDNS()
+	switch {
+	case !ok:
+		return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	case len(servers) == 0:
+		return nil, ErrNoLocalDNS
+	}
+	return lookupVia(ctx, host, servers, DialDirect)
+}
+
+// DialFunc dials a nameserver.
+type DialFunc func(ctx context.Context, network string, ap netip.AddrPort) (net.Conn, error)
+
+// DialDirect dials a nameserver over the host's network.
+func DialDirect(ctx context.Context, network string, ap netip.AddrPort) (net.Conn, error) {
+	var d net.Dialer
+	return d.DialContext(ctx, network, ap.String())
+}
+
+// lookupVia asks each nameserver in turn until one has addresses.
+func lookupVia(ctx context.Context, name string, servers []netip.AddrPort, dial DialFunc) ([]netip.Addr, error) {
+	var lastErr error
+	for _, ap := range servers {
+		r := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return dial(ctx, network, ap)
+		}}
+		ips, err := r.LookupNetIP(ctx, "ip", name)
+		if err == nil && len(ips) > 0 {
+			for i := range ips {
+				ips[i] = ips[i].Unmap()
+			}
+			return ips, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
 }
 
 func (m *Mux) cached(key string) ([]netip.Addr, bool) {
