@@ -5,11 +5,11 @@ go 1.27.4
 require (
 	charm.land/bubbletea/v2 v2.1.1
 	charm.land/huh/v2 v2.0.3
-	charm.land/lipgloss/v2 v2.0.6
+	charm.land/lipgloss/v2 v2.1.1
 	github.com/tailscale/wireguard-go v0.0.0-20261106233718-9e0ab45c16ca
-	golang.org/x/mod v0.42.0
+	golang.org/x/mod v0.43.0
 	golang.org/x/net v0.62.0
-	golang.org/x/sys v0.49.0
+	golang.org/x/sys v0.50.0
 	golang.zx2c4.com/wireguard/windows v1.1.1
 	gvisor.dev/gvisor v0.0.0-20260915211658-a6f909f08a72
 	tailscale.com v1.104.7
@@ -137,7 +137,7 @@ require (
 	golang.org/x/term v0.47.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
-	golang.org/x/tools v0.51.0 // indirect
+	golang.org/x/tools v0.52.0 // indirect
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
 	honnef.co/go/tools v0.8.1 // indirect
 	k8s.io/client-go v0.37.0 // indirect
