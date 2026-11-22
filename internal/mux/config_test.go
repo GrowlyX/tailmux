@@ -7,6 +7,19 @@ import (
 	"testing"
 )
 
+// shields_up blocks everything coming in, serve entries included, so the
+// two together can only be a mistake.
+func TestShieldsUpRejectsServe(t *testing.T) {
+	c := &Config{StateDir: t.TempDir(), Tailnets: []TailnetConfig{{Name: "work", ShieldsUp: true, Serve: []ServeEntry{{Port: 3773, TCP: "3773"}}}}}
+	if err := c.Normalize(); err == nil || !strings.Contains(err.Error(), "shields_up") {
+		t.Fatalf("shields_up with serve: got %v, want an error naming shields_up", err)
+	}
+	c = &Config{StateDir: t.TempDir(), Tailnets: []TailnetConfig{{Name: "work", ShieldsUp: true}}}
+	if err := c.Normalize(); err != nil {
+		t.Fatalf("shields_up alone: %v", err)
+	}
+}
+
 // Logins live under the tailnet's state, not its name: renaming "work"
 // to "work2" and then "home" to "work" must leave each login with the
 // tailnet it belongs to.

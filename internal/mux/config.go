@@ -101,6 +101,11 @@ type TailnetConfig struct {
 	// Serve shares services on this machine with the tailnet, like
 	// `tailscale serve`. Applied when the node comes up.
 	Serve []ServeEntry `json:"serve,omitempty"`
+	// ShieldsUp blocks every incoming connection from this tailnet,
+	// whatever its ACLs allow, like `tailscale set --shields-up`. For a
+	// tailnet this machine only connects out to, such as an employer's
+	// or a client's. Outgoing connections are unaffected.
+	ShieldsUp bool `json:"shields_up,omitempty"`
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -186,6 +191,9 @@ func (c *Config) Normalize() error {
 		}
 		if err := normalizeServes(t.Serve); err != nil {
 			return fmt.Errorf("config: tailnet %q: %w", t.Name, err)
+		}
+		if t.ShieldsUp && len(t.Serve) > 0 {
+			return fmt.Errorf("config: tailnet %q: shields_up blocks incoming connections, so nothing could reach its serve entries; drop one of them", t.Name)
 		}
 	}
 	for k, v := range c.Pins {
