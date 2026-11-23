@@ -86,7 +86,12 @@ func newTailnet(cfg TailnetConfig, priority int, o tailnetOpts, onChange func())
 	if o.memStore {
 		t.srv.Store = new(mem.Store)
 	}
-	t.srv.RegisterFallbackTCPHandler(forwardInbound)
+	// With shields up nothing may come in, so don't hand connections to
+	// local services at all. That also covers the moment between Start
+	// and start's EditPrefs, before shields-up is in force.
+	if !cfg.ShieldsUp {
+		t.srv.RegisterFallbackTCPHandler(forwardInbound)
+	}
 	return t
 }
 
@@ -106,12 +111,19 @@ func (t *Tailnet) start(ctx context.Context) error {
 		return err
 	}
 	t.lc = lc
-	// Accept subnet routes; that's the whole point.
-	if _, err := lc.EditPrefs(ctx, &ipn.MaskedPrefs{
+	// Accept subnet routes; that's the whole point. tsnet starts every
+	// node from default prefs, so shields-up has to be set again on each
+	// start too.
+	prefs := &ipn.MaskedPrefs{
 		Prefs:       ipn.Prefs{RouteAll: true},
 		RouteAllSet: true,
-	}); err != nil {
-		return fmt.Errorf("%s: accept routes: %w", t.cfg.Name, err)
+	}
+	if t.cfg.ShieldsUp {
+		prefs.ShieldsUp = true
+		prefs.ShieldsUpSet = true
+	}
+	if _, err := lc.EditPrefs(ctx, prefs); err != nil {
+		return fmt.Errorf("%s: set prefs: %w", t.cfg.Name, err)
 	}
 	go t.watch(ctx)
 	return nil
@@ -459,6 +471,7 @@ func (t *Tailnet) logout(ctx context.Context) error {
 	prefs.Hostname = t.cfg.Hostname
 	prefs.WantRunning = t.Enabled()
 	prefs.RouteAll = true
+	prefs.ShieldsUp = t.cfg.ShieldsUp
 	if err := t.lc.Start(ctx, ipn.Options{UpdatePrefs: prefs, AuthKey: t.cfg.AuthKey}); err != nil {
 		return fmt.Errorf("%s: log in again: %w", t.cfg.Name, err)
 	}

@@ -64,7 +64,7 @@ func TestEndToEnd(t *testing.T) {
 		HTTP:     "127.0.0.1:0",
 		Tailnets: []TailnetConfig{
 			{Name: "alpha", ControlURL: alpha.URL, Ephemeral: true, Serve: []ServeEntry{{Port: e2eServePort, TCP: served.Addr().String()}}},
-			{Name: "bravo", ControlURL: bravo.URL, Ephemeral: true},
+			{Name: "bravo", ControlURL: bravo.URL, Ephemeral: true, ShieldsUp: true},
 			{Name: "charlie", ControlURL: charlie.URL, Ephemeral: true},
 		},
 		Pins: map[string]string{"192.0.2.128/25": "bravo"},
@@ -76,7 +76,7 @@ func TestEndToEnd(t *testing.T) {
 	t.Cleanup(func() { m.Close() })
 	// The config as a user would have written it, for the management API.
 	m.ConfigPath = filepath.Join(t.TempDir(), "config.json")
-	os.WriteFile(m.ConfigPath, []byte(fmt.Sprintf(`{"tailnets":[{"name":"alpha","control_url":%q},{"name":"bravo","control_url":%q},{"name":"charlie","control_url":%q}]}`, alpha.URL, bravo.URL, charlie.URL)), 0o600)
+	os.WriteFile(m.ConfigPath, []byte(fmt.Sprintf(`{"tailnets":[{"name":"alpha","control_url":%q},{"name":"bravo","control_url":%q,"shields_up":true},{"name":"charlie","control_url":%q}]}`, alpha.URL, bravo.URL, charlie.URL)), 0o600)
 	if err := m.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -511,6 +511,63 @@ func TestEndToEnd(t *testing.T) {
 		})
 		if got, _ := read(private); got != "" {
 			t.Errorf("127.0.0.1-only service reached from the tailnet: %q", got)
+		}
+	})
+
+	// bravo has shields_up: tailmux still reaches its devices, but none
+	// of them reach this machine, not even a service on 0.0.0.0.
+	t.Run("shields up", func(t *testing.T) {
+		if _, err := lanAddrs(); err != nil {
+			t.Skip(err)
+		}
+		prefs, err := m.Tailnet("bravo").lc.GetPrefs(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !prefs.ShieldsUp {
+			t.Fatal("bravo's node runs without shields up")
+		}
+		peer, _ := bravo.Node(t, ctx, "shielded-client")
+		pln, err := peer.Listen("tcp", ":80")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { pln.Close() })
+		go func() {
+			for {
+				c, err := pln.Accept()
+				if err != nil {
+					return
+				}
+				fmt.Fprint(c, servedGreeting)
+				c.Close()
+			}
+		}()
+		// Outgoing works, which also proves the path between the two is up.
+		lab.Eventually(t, "tailmux reaches the bravo peer", 30*time.Second, func() error {
+			c, _, err := m.DialTailnet(ctx, "tcp", "shielded-client.bravo:80")
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			c.SetDeadline(time.Now().Add(5 * time.Second))
+			if b, _ := io.ReadAll(c); string(b) != servedGreeting {
+				return fmt.Errorf("got %q", b)
+			}
+			return nil
+		})
+		public := greeter(t, "0.0.0.0:0")
+		self := netip.MustParseAddr(m.Tailnet("bravo").Status().SelfIPs[0])
+		dctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		c, err := peer.Dial(dctx, "tcp", netip.AddrPortFrom(self, uint16(public.Addr().(*net.TCPAddr).Port)).String())
+		if err != nil {
+			return // dropped, as it should be
+		}
+		defer c.Close()
+		c.SetDeadline(time.Now().Add(5 * time.Second))
+		if b, _ := io.ReadAll(c); len(b) > 0 {
+			t.Errorf("a bravo device reached a service on 0.0.0.0 despite shields up: %q", b)
 		}
 	})
 }

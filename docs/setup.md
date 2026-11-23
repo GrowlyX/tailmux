@@ -86,6 +86,7 @@ signing device, and use what it prints as that tailnet's `auth_key`.
 | `tailnets[].ephemeral` | `false` | Device disappears when tailmux stops |
 | `tailnets[].state` | set when added | Folder in `state_dir` holding the login. Keeps the login through a rename; don't copy it between tailnets |
 | `tailnets[].serve` | none | Services on this machine to share with the tailnet ([below](#sharing-services-from-this-machine)) |
+| `tailnets[].shields_up` | `false` | Block every incoming connection from this tailnet, whatever its ACLs say ([below](#incoming-connections)) |
 | `hostname` | `tailmux-<host>` | Device name in every tailnet |
 | `pins` | none | CIDR or domain → tailnet, for contested routes |
 | `socks5` | `127.0.0.1:1055` | [Proxy mode](proxy.md) |
@@ -117,6 +118,12 @@ service listens on `0.0.0.0` or one of its LAN addresses. Services bound only to
 - A port with no service on it accepts the connection and then closes it,
   instead of refusing it.
 - With no LAN connection, incoming connections are closed.
+
+To block a tailnet from reaching this machine at all, whatever its ACLs
+allow, set `"shields_up": true` on it, like `tailscale set --shields-up`.
+Use it for a tailnet you only connect out to, such as an employer's or a
+client's: outgoing connections work as usual, nothing comes in. It can't
+be combined with `serve`.
 
 ## Sharing services from this machine
 

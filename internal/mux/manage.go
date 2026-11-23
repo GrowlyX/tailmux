@@ -43,6 +43,9 @@ func (m *Mux) AddTailnet(tc TailnetConfig) (*Tailnet, error) {
 	if err := normalizeServes(tc.Serve); err != nil {
 		return nil, err
 	}
+	if err := tc.checkInbound(); err != nil {
+		return nil, err
+	}
 	m.tmu.Lock()
 	if m.byName[tc.Name] != nil {
 		m.tmu.Unlock()
